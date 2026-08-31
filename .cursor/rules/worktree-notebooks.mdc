@@ -1,0 +1,22 @@
+---
+description: Each worktree owns its own development notebook; do not edit shared demo notebooks in parallel worktrees
+alwaysApply: true
+---
+
+# Worktree notebooks
+
+Each parallel worktree gets its own development notebook. Run Jupyter from that worktree so the notebook exercises that worktree's code and environment.
+
+- Create or use a worktree-local exploratory notebook (Jupytext pairs `ipynb` with `py:percent`).
+- Start Jupyter from the worktree root (after `uv sync`) so the kernel uses that worktree's `.venv` and sources.
+- Do not modify shared story/demo notebooks (especially `demo_story.ipynb`) from a parallel worktree.
+- After the worktree is merged, use the exploratory notebooks and commits to update `demo_story.ipynb`.
+
+```text
+# BAD — editing the shared demo from a feature worktree
+worktrees/my-feature/demo_story.ipynb
+
+# GOOD — local exploration in the worktree, demo updated after merge
+worktrees/my-feature/scratch_<topic>.ipynb
+# merge, then update demo_story.ipynb on the main worktree
+```
