@@ -1,0 +1,9 @@
+{
+  "intents": {
+    "flows": ["account_access"],
+    "subflows": {
+      "account_access": ["recover_username", "recover_password"]
+    }
+  },
+  "notes": "Subset of ABCD ontology.json. Seed playbook knows the account_access intent but only two of its three real subflows. reset_2fa is deliberately omitted so the existing-intent / new-subflow path has something to find."
+}

@@ -1,0 +1,4 @@
+{
+  "recover_username": ["pull-up-account", "verify-identity"],
+  "recover_password": ["pull-up-account", "enter-details", "make-password"]
+}

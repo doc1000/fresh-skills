@@ -10,3 +10,7 @@ wheels/
 # Virtual environments
 .venv
 .env
+
+# Local demo stores
+scratch_data/*.sqlite
+scratch_data/*.sqlite-journal

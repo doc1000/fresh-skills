@@ -1,0 +1,65 @@
+{
+  "Account Access": {
+    "description": "username, password, two-factor authentication, and other login / account-access problems including lockouts",
+    "subflows": {
+      "Recover Username": {
+        "actions": [
+          {
+            "type": "interaction",
+            "button": "Pull up Account",
+            "text": "Ask the customer for their Full name or Account ID with [Pull up Account]. This loads information in the background related to this user.",
+            "subtext": []
+          },
+          {
+            "type": "kb query",
+            "button": "Verify Identity",
+            "text": "Ask the customer for 3 out of 4 items below and use the [Verify Identity] button",
+            "subtext": ["Full name - first and last", "Zip Code", "Phone number", "Email Address"]
+          },
+          {
+            "type": "communication",
+            "button": "N/A",
+            "text": "You make up their username with the first letter of their first name, their last name with a 1",
+            "subtext": ["For example: John Smith → jsmith1"]
+          }
+        ],
+        "instructions": [
+          "To get their username, you must",
+          "That’s it. This flow is very short and often occurs in conjunction with other flows."
+        ]
+      },
+      "Recover Password": {
+        "actions": [
+          {
+            "type": "interaction",
+            "button": "Pull up Account",
+            "text": "Get Full Name or Account ID for [Pull up Account]",
+            "subtext": []
+          },
+          {
+            "type": "interaction",
+            "button": "Enter Details",
+            "text": "Get the customer’s username to check their identity",
+            "subtext": ["If they don’t have their username, then follow the Recover Username flow above"]
+          },
+          {
+            "type": "communication",
+            "button": "N/A",
+            "text": "Tell the customer you cannot get their password, but you can generate a new one for them.",
+            "subtext": []
+          },
+          {
+            "type": "kb query",
+            "button": "Make Password",
+            "text": "To operate the [Make Password] action, you will first need the pin number or security answer",
+            "subtext": ["Enter either value into the box and then click the [Make Password] button"]
+          }
+        ],
+        "instructions": [
+          "Help the customer get a new password",
+          "Share the password with the customer."
+        ]
+      }
+    }
+  }
+}

@@ -4,7 +4,11 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "langchain-core>=1.6.1",
+    "langgraph>=1.2.11",
+    "langsmith>=0.11.2",
+]
 
 [dependency-groups]
 dev = [
