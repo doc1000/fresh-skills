@@ -10,3 +10,9 @@ wheels/
 # Virtual environments
 .venv
 .env
+
+# ABCD raw dump (regenerate with scripts/download_abcd.py)
+data/raw/*.json
+data/raw/*.gz
+data/raw/*.part
+!data/raw/.gitkeep
