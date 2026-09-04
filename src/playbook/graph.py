@@ -1,0 +1,1044 @@
+"""LangGraph construction, nodes, and invoke helpers."""
+
+from __future__ import annotations
+
+import json
+import operator
+import uuid
+from collections import Counter
+from typing import Annotated, Any, TypedDict
+
+from langgraph.graph import END, START, StateGraph
+
+from playbook import runtime
+from playbook.scoring import (
+    CLUSTER_THRESHOLD,
+    INTENT_THRESHOLD,
+    LOW_INTENT_BAND,
+    LOW_SUBFLOW_BAND,
+    MIN_CLUSTER_SIZE,
+    MIN_SUCCESS_FOR_PATTERN,
+    PATTERN_SUPPORT,
+    SUBFLOW_THRESHOLD,
+    jaccard,
+)
+from playbook.store import now_iso
+from playbook.tools import (
+    cluster_conversation_ids,
+    draft_guideline_stub,
+    draft_kb_stub,
+    score_intent_similarity,
+    score_subflow_similarity,
+)
+
+
+class MetaAgentState(TypedDict, total=False):
+    run_id: str
+    cohort_query: dict[str, Any]
+    kb_version: int
+    current_stage: str
+    target_subflow: str
+    intent_summary: dict[str, Any]
+    subflow_summary: dict[str, Any]
+    discovery_summary: dict[str, Any]
+    recommendation_summary: dict[str, Any]
+    pending_proposal_ids: list[str]
+    approved_change_ids: list[str]
+    errors: Annotated[list[dict[str, Any]], operator.add]
+
+
+SIMULATED_REVIEW = {
+    "shipping_issue": ("accept", "Coherent new intent; enough shipping evidence."),
+    "reset_2fa": ("accept", "Repeatable 2FA reset pattern."),
+    "missing": ("accept", "Repeatable missing-package resolution."),
+}
+
+ACTION_FINGERPRINTS = {
+    ("pull-up-account", "enter-details", "send-link"): "reset_2fa",
+    (
+        "pull-up-account",
+        "validate-purchase",
+        "record-reason",
+        "update-order",
+        "make-purchase",
+    ): "missing",
+}
+
+
+def empty_state(**kwargs: Any) -> MetaAgentState:
+    version = runtime.playbook.version if runtime.playbook is not None else 1
+    state: MetaAgentState = {
+        "run_id": "",
+        "cohort_query": {},
+        "kb_version": version,
+        "current_stage": "",
+        "target_subflow": "",
+        "intent_summary": {},
+        "subflow_summary": {},
+        "discovery_summary": {},
+        "recommendation_summary": {},
+        "pending_proposal_ids": [],
+        "approved_change_ids": [],
+        "errors": [],
+    }
+    state.update(kwargs)
+    return state
+
+
+def run_config(state: MetaAgentState, *, agent: str) -> dict[str, Any]:
+    run_id = state.get("run_id") or "unassigned"
+    version = runtime.playbook.version if runtime.playbook is not None else state.get("kb_version", 1)
+    return {
+        "run_name": f"{agent}:{run_id}",
+        "tags": ["demo", "modular-meta-agent", agent, f"run:{run_id}"],
+        "metadata": {
+            "agent": agent,
+            "run_id": run_id,
+            "kb_version": version,
+        },
+    }
+
+
+def add_phase_node(graph: StateGraph, name: str, fn, *, agent: str, phase: str) -> None:
+    graph.add_node(name, fn, metadata={"agent": agent, "phase": phase})
+
+
+def render_mermaid(compiled, *, xray: bool | int = False) -> str:
+    return compiled.get_graph(xray=xray).draw_mermaid()
+
+
+def simulate_hitl(proposal: dict[str, Any]) -> tuple[str, str]:
+    candidate = proposal.get("candidate") or ""
+    ptype = proposal.get("proposal_type")
+    if ptype in {"outlier", "emerging"}:
+        return "decline", "Placeholder HITL: monitor / no playbook change."
+    if candidate in SIMULATED_REVIEW:
+        return SIMULATED_REVIEW[candidate]
+    return "decline", "Placeholder HITL: not in the demo accept list."
+
+
+def propose_intent_label(task_ids: list[str]) -> str:
+    blob = " ".join(t["text"] for t in runtime.store.get_tasks(task_ids))
+    if "package" in blob or "shipment" in blob or "delivered" in blob:
+        return "shipping_issue"
+    return "new_intent"
+
+
+def propose_subflow_label(task_ids: list[str], fallback: str) -> tuple[str, list[str]]:
+    successful = [t for t in runtime.store.get_tasks(task_ids) if t["success"]]
+    if not successful:
+        return fallback, []
+    sequences = [tuple(t["actions"]) for t in successful]
+    actions = list(Counter(sequences).most_common(1)[0][0])
+    label = ACTION_FINGERPRINTS.get(tuple(actions), "_".join(actions[-2:]) if actions else fallback)
+    return label, actions
+
+
+def mean_pairwise_jaccard(task_ids: list[str]) -> float:
+    texts = [t["text"] for t in runtime.store.get_tasks(task_ids)]
+    pairs = [jaccard(texts[i], texts[j]) for i in range(len(texts)) for j in range(i + 1, len(texts))]
+    return sum(pairs) / len(pairs) if pairs else 0.0
+
+
+def new_id(prefix: str) -> str:
+    return f"{prefix}_{uuid.uuid4().hex[:8]}"
+
+
+def cohort_query(state: MetaAgentState) -> dict[str, Any]:
+    query = dict(
+        state.get("cohort_query")
+        or {
+            "source": "scratch_data/incoming_conversations.json",
+            "window": "demo-week",
+            "as_of": "2026-09-01",
+        }
+    )
+    run_id = state.get("run_id") or f"week-{query.get('as_of', 'demo')}"
+    ids = [row["task_id"] for row in runtime.store.fetchall("SELECT task_id FROM tasks ORDER BY task_id")]
+    runtime.store.set_workset(run_id, "cohort", ids)
+    runtime.store.set_staging(run_id, "cohort_query", query)
+    return {"run_id": run_id, "cohort_query": query, "current_stage": "cohort.query"}
+
+
+def cohort_process(state: MetaAgentState) -> dict[str, Any]:
+    return {"current_stage": "cohort.process"}
+
+
+def cohort_persist(state: MetaAgentState) -> dict[str, Any]:
+    run_id = state["run_id"]
+    query = runtime.store.get_staging(run_id, "cohort_query")
+    ids = runtime.store.get_workset(run_id, "cohort")
+    runtime.store.create_run(run_id, query, runtime.playbook.version)
+    runtime.store.add_cohort(run_id, ids)
+    return {"current_stage": "cohort.persist", "kb_version": runtime.playbook.version}
+
+
+def cohort_summarize(state: MetaAgentState) -> dict[str, Any]:
+    ids = runtime.store.cohort_ids(state["run_id"])
+    summary = {"total": len(ids), "source": (state.get("cohort_query") or {}).get("source")}
+    runtime.store.set_staging(state["run_id"], "cohort_summary", summary)
+    return {"current_stage": "cohort.summarize"}
+
+
+def build_cohort_graph():
+    graph = StateGraph(MetaAgentState)
+    add_phase_node(graph, "query", cohort_query, agent="meta", phase="query")
+    add_phase_node(graph, "process", cohort_process, agent="meta", phase="process")
+    add_phase_node(graph, "persist", cohort_persist, agent="meta", phase="persist")
+    add_phase_node(graph, "summarize", cohort_summarize, agent="meta", phase="summarize")
+    graph.add_edge(START, "query")
+    graph.add_edge("query", "process")
+    graph.add_edge("process", "persist")
+    graph.add_edge("persist", "summarize")
+    graph.add_edge("summarize", END)
+    return graph.compile(name="establish_cohort")
+
+
+def classify_intents_process(task_ids: list[str]) -> list[dict[str, Any]]:
+    results = []
+    intent_ids = runtime.playbook.intent_ids()
+    for tid in task_ids:
+        if not intent_ids:
+            results.append({"task_id": tid, "intent_id": "unknown", "confidence": 0.0})
+            continue
+        scored = [
+            (intent_id, score_intent_similarity.invoke({"conversation_id": tid, "intent_id": intent_id}))
+            for intent_id in intent_ids
+        ]
+        scored.sort(key=lambda item: item[1], reverse=True)
+        best_id, best = scored[0]
+        results.append(
+            {
+                "task_id": tid,
+                "intent_id": best_id if best >= INTENT_THRESHOLD else "unknown",
+                "confidence": best,
+                "scores": scored,
+            }
+        )
+    return results
+
+
+def intent_query(state: MetaAgentState) -> dict[str, Any]:
+    ids = runtime.store.unresolved_intent_ids(state["run_id"])
+    runtime.store.set_workset(state["run_id"], "intent", ids)
+    return {"current_stage": "intent.query"}
+
+
+def intent_process(state: MetaAgentState) -> dict[str, Any]:
+    ids = runtime.store.get_workset(state["run_id"], "intent")
+    runtime.store.set_staging(state["run_id"], "intent", classify_intents_process(ids))
+    return {"current_stage": "intent.process"}
+
+
+def intent_persist(state: MetaAgentState) -> dict[str, Any]:
+    staged = runtime.store.get_staging(state["run_id"], "intent")
+    rows = [
+        {
+            "task_id": row["task_id"],
+            "run_id": state["run_id"],
+            "intent_id": row["intent_id"],
+            "confidence": row["confidence"],
+            "method": "jaccard_intent_doc_v1",
+            "kb_version": runtime.playbook.version,
+            "created_at": now_iso(),
+        }
+        for row in staged
+    ]
+    if rows:
+        runtime.store.persist_intent_labels(rows)
+    return {"current_stage": "intent.persist", "kb_version": runtime.playbook.version}
+
+
+def _intent_summary(run_id: str, processed: list[dict[str, Any]]) -> dict[str, Any]:
+    classified = [r for r in processed if r["intent_id"] != "unknown"]
+    unknown = [r for r in processed if r["intent_id"] == "unknown"]
+    low = [r for r in classified if r["confidence"] < LOW_INTENT_BAND]
+    latest = runtime.store.latest_intents(run_id)
+    by_intent: dict[str, int] = {}
+    for row in latest.values():
+        by_intent[row["intent_id"]] = by_intent.get(row["intent_id"], 0) + 1
+    return {
+        "total": len(runtime.store.cohort_ids(run_id)),
+        "processed": len(processed),
+        "classified": len(classified),
+        "unknown": len(unknown),
+        "low_confidence": len(low),
+        "by_intent": by_intent,
+        "still_unresolved": len(runtime.store.unresolved_intent_ids(run_id)),
+    }
+
+
+def intent_summarize(state: MetaAgentState) -> dict[str, Any]:
+    processed = runtime.store.get_staging(state["run_id"], "intent")
+    summary = _intent_summary(state["run_id"], processed)
+    return {
+        "current_stage": "intent.summarize",
+        "intent_summary": summary,
+        "kb_version": runtime.playbook.version,
+    }
+
+
+def build_intent_graph():
+    graph = StateGraph(MetaAgentState)
+    add_phase_node(graph, "query", intent_query, agent="intent", phase="query")
+    add_phase_node(graph, "process", intent_process, agent="intent", phase="process")
+    add_phase_node(graph, "persist", intent_persist, agent="intent", phase="persist")
+    add_phase_node(graph, "summarize", intent_summarize, agent="intent", phase="summarize")
+    graph.add_edge(START, "query")
+    graph.add_edge("query", "process")
+    graph.add_edge("process", "persist")
+    graph.add_edge("persist", "summarize")
+    graph.add_edge("summarize", END)
+    return graph.compile(name="classify_intents")
+
+
+def classify_subflows_process(task_ids: list[str], run_id: str) -> list[dict[str, Any]]:
+    latest_intents = runtime.store.latest_intents(run_id)
+    results = []
+    for tid in task_ids:
+        intent_id = latest_intents[tid]["intent_id"]
+        candidates = [sid for sid in runtime.playbook.subflows_for(intent_id) if sid in runtime.playbook.kb]
+        if not candidates:
+            results.append(
+                {
+                    "task_id": tid,
+                    "intent_id": intent_id,
+                    "subflow_id": "unknown",
+                    "confidence": 0.0,
+                    "scores": [],
+                }
+            )
+            continue
+        scored = [
+            (sid, score_subflow_similarity.invoke({"conversation_id": tid, "subflow_id": sid}))
+            for sid in candidates
+        ]
+        scored.sort(key=lambda item: item[1], reverse=True)
+        best_id, best = scored[0]
+        results.append(
+            {
+                "task_id": tid,
+                "intent_id": intent_id,
+                "subflow_id": best_id if best >= SUBFLOW_THRESHOLD else "unknown",
+                "confidence": best,
+                "scores": scored,
+            }
+        )
+    return results
+
+
+def subflow_query(state: MetaAgentState) -> dict[str, Any]:
+    ids = runtime.store.unresolved_subflow_ids(state["run_id"])
+    runtime.store.set_workset(state["run_id"], "subflow", ids)
+    return {"current_stage": "subflow.query"}
+
+
+def subflow_process(state: MetaAgentState) -> dict[str, Any]:
+    ids = runtime.store.get_workset(state["run_id"], "subflow")
+    runtime.store.set_staging(state["run_id"], "subflow", classify_subflows_process(ids, state["run_id"]))
+    return {"current_stage": "subflow.process"}
+
+
+def subflow_persist(state: MetaAgentState) -> dict[str, Any]:
+    staged = runtime.store.get_staging(state["run_id"], "subflow")
+    rows = [
+        {
+            "task_id": row["task_id"],
+            "run_id": state["run_id"],
+            "intent_id": row["intent_id"],
+            "subflow_id": row["subflow_id"],
+            "confidence": row["confidence"],
+            "method": "lcs_kb_actions_v1",
+            "kb_version": runtime.playbook.version,
+            "created_at": now_iso(),
+        }
+        for row in staged
+    ]
+    if rows:
+        runtime.store.persist_subflow_labels(rows)
+    return {"current_stage": "subflow.persist", "kb_version": runtime.playbook.version}
+
+
+def _subflow_summary(run_id: str, processed: list[dict[str, Any]]) -> dict[str, Any]:
+    classified = [r for r in processed if r["subflow_id"] != "unknown"]
+    unknown = [r for r in processed if r["subflow_id"] == "unknown"]
+    low = [r for r in classified if r["confidence"] < LOW_SUBFLOW_BAND]
+    by_intent: dict[str, dict[str, int]] = {}
+    latest = runtime.store.latest_subflows(run_id)
+    intents = runtime.store.latest_intents(run_id)
+    for tid, row in latest.items():
+        intent_row = intents.get(tid)
+        intent_id = row["intent_id"] or (intent_row["intent_id"] if intent_row else "?")
+        by_intent.setdefault(intent_id, {})
+        by_intent[intent_id][row["subflow_id"]] = by_intent[intent_id].get(row["subflow_id"], 0) + 1
+    return {
+        "processed": len(processed),
+        "classified": len(classified),
+        "unknown": len(unknown),
+        "low_confidence": len(low),
+        "by_intent": by_intent,
+        "still_unresolved": len(runtime.store.unresolved_subflow_ids(run_id)),
+    }
+
+
+def subflow_summarize(state: MetaAgentState) -> dict[str, Any]:
+    processed = runtime.store.get_staging(state["run_id"], "subflow")
+    return {
+        "current_stage": "subflow.summarize",
+        "subflow_summary": _subflow_summary(state["run_id"], processed),
+        "kb_version": runtime.playbook.version,
+    }
+
+
+def build_subflow_graph():
+    graph = StateGraph(MetaAgentState)
+    add_phase_node(graph, "query", subflow_query, agent="subflow", phase="query")
+    add_phase_node(graph, "process", subflow_process, agent="subflow", phase="process")
+    add_phase_node(graph, "persist", subflow_persist, agent="subflow", phase="persist")
+    add_phase_node(graph, "summarize", subflow_summarize, agent="subflow", phase="summarize")
+    graph.add_edge(START, "query")
+    graph.add_edge("query", "process")
+    graph.add_edge("process", "persist")
+    graph.add_edge("persist", "summarize")
+    graph.add_edge("summarize", END)
+    return graph.compile(name="classify_subflows")
+
+
+def _examples(task_ids: list[str]) -> list[dict[str, str]]:
+    out = []
+    for task in runtime.store.get_tasks(task_ids)[:3]:
+        out.append({"task_id": task["task_id"], "text": task["text"][:180]})
+    return out
+
+
+def intent_discovery_query(state: MetaAgentState) -> dict[str, Any]:
+    ids = runtime.store.unresolved_intent_ids(state["run_id"])
+    runtime.store.set_workset(state["run_id"], "intent_discovery", ids)
+    return {"current_stage": "intent_discovery.query"}
+
+
+def intent_discovery_discover(state: MetaAgentState) -> dict[str, Any]:
+    ids = runtime.store.get_workset(state["run_id"], "intent_discovery")
+    clusters = cluster_conversation_ids.invoke({"conversation_ids": ids}) if ids else []
+    runtime.store.set_staging(state["run_id"], "intent_discovery_clusters", clusters)
+    return {"current_stage": "intent_discovery.discover"}
+
+
+def intent_discovery_validate(state: MetaAgentState) -> dict[str, Any]:
+    clusters = runtime.store.get_staging(state["run_id"], "intent_discovery_clusters")
+    candidates = []
+    for cluster in clusters:
+        mean = mean_pairwise_jaccard(cluster)
+        coherent = len(cluster) >= MIN_CLUSTER_SIZE and mean >= CLUSTER_THRESHOLD
+        if coherent:
+            label = propose_intent_label(cluster)
+            candidates.append(
+                {
+                    "proposal_type": "new_intent",
+                    "candidate": label,
+                    "parent_intent": None,
+                    "supporting_task_ids": cluster,
+                    "metrics": {"size": len(cluster), "mean_jaccard": round(mean, 3), "coherent": True},
+                }
+            )
+        else:
+            candidates.append(
+                {
+                    "proposal_type": "outlier",
+                    "candidate": None,
+                    "parent_intent": None,
+                    "supporting_task_ids": cluster,
+                    "metrics": {"size": len(cluster), "mean_jaccard": round(mean, 3), "coherent": False},
+                }
+            )
+    runtime.store.set_staging(state["run_id"], "intent_discovery", candidates)
+    return {"current_stage": "intent_discovery.validate"}
+
+
+def intent_discovery_persist_proposal(state: MetaAgentState) -> dict[str, Any]:
+    pending_ids = []
+    for cand in runtime.store.get_staging(state["run_id"], "intent_discovery"):
+        proposal_id = new_id("prop")
+        pending_ids.append(proposal_id)
+        runtime.store.persist_proposal(
+            {
+                "proposal_id": proposal_id,
+                "run_id": state["run_id"],
+                "proposal_type": cand["proposal_type"],
+                "candidate": cand["candidate"],
+                "parent_intent": cand["parent_intent"],
+                "supporting_task_ids": json.dumps(cand["supporting_task_ids"]),
+                "examples": json.dumps(_examples(cand["supporting_task_ids"])),
+                "metrics": json.dumps(cand["metrics"]),
+                "review_decision": None,
+                "review_note": None,
+                "resulting_kb_version": None,
+                "created_at": now_iso(),
+            }
+        )
+    runtime.store.set_staging(state["run_id"], "intent_discovery_ids", pending_ids)
+    return {"current_stage": "intent_discovery.persist_proposal", "pending_proposal_ids": pending_ids}
+
+
+def intent_discovery_hitl(state: MetaAgentState) -> dict[str, Any]:
+    ids = runtime.store.get_staging(state["run_id"], "intent_discovery_ids")
+    for proposal in runtime.store.list_proposals(state["run_id"]):
+        if proposal["proposal_id"] not in ids:
+            continue
+        decision, note = simulate_hitl(proposal)
+        runtime.store.decide_proposal(proposal["proposal_id"], decision, note)
+    return {"current_stage": "intent_discovery.hitl"}
+
+
+def intent_discovery_persist_kb(state: MetaAgentState) -> dict[str, Any]:
+    approved = []
+    ids = set(runtime.store.get_staging(state["run_id"], "intent_discovery_ids") or [])
+    for proposal in runtime.store.list_proposals(state["run_id"], "new_intent"):
+        if proposal["proposal_id"] not in ids or proposal["review_decision"] != "accept":
+            continue
+        description = (
+            "package shipment delivered missing items carrier porch tracking "
+            "order purchase replacement"
+            if proposal["candidate"] == "shipping_issue"
+            else "newly discovered operational intent"
+        )
+        version = runtime.playbook.add_intent(
+            proposal["candidate"],
+            proposal["candidate"].replace("_", " ").title(),
+            description,
+        )
+        evidence_ids = json.loads(proposal["supporting_task_ids"])
+        metrics = json.loads(proposal["metrics"])
+        runtime.store.persist_intent_labels(
+            [
+                {
+                    "task_id": tid,
+                    "run_id": state["run_id"],
+                    "intent_id": proposal["candidate"],
+                    "confidence": metrics.get("mean_jaccard") or 1.0,
+                    "method": "discovery_evidence_v1",
+                    "kb_version": version,
+                    "created_at": now_iso(),
+                }
+                for tid in evidence_ids
+            ]
+        )
+        runtime.store.log_kb_change(version, "add_intent", {"intent": proposal["candidate"], "tasks": evidence_ids})
+        runtime.store.mark_proposal_kb_version(proposal["proposal_id"], version)
+        runtime.store.set_run_kb_version(state["run_id"], version)
+        approved.append(proposal["proposal_id"])
+    return {
+        "current_stage": "intent_discovery.persist_kb",
+        "kb_version": runtime.playbook.version,
+        "approved_change_ids": approved,
+    }
+
+
+def intent_discovery_summarize(state: MetaAgentState) -> dict[str, Any]:
+    ids = set(runtime.store.get_staging(state["run_id"], "intent_discovery_ids") or [])
+    rows = [p for p in runtime.store.list_proposals(state["run_id"]) if p["proposal_id"] in ids]
+    summary = {
+        "unresolved_tasks": len(runtime.store.get_workset(state["run_id"], "intent_discovery")),
+        "candidate_count": sum(1 for p in rows if p["proposal_type"] == "new_intent"),
+        "outlier_count": sum(1 for p in rows if p["proposal_type"] == "outlier"),
+        "approved_count": sum(1 for p in rows if p["review_decision"] == "accept"),
+        "rejected_count": sum(1 for p in rows if p["review_decision"] == "decline"),
+    }
+    merged = dict(state.get("discovery_summary") or {})
+    merged["intents"] = summary
+    return {"current_stage": "intent_discovery.summarize", "discovery_summary": merged}
+
+
+def build_intent_discovery_graph():
+    graph = StateGraph(MetaAgentState)
+    add_phase_node(graph, "query", intent_discovery_query, agent="intent_discovery", phase="query")
+    add_phase_node(graph, "discover", intent_discovery_discover, agent="intent_discovery", phase="process")
+    add_phase_node(graph, "validate", intent_discovery_validate, agent="intent_discovery", phase="process")
+    add_phase_node(
+        graph, "persist_proposal", intent_discovery_persist_proposal, agent="intent_discovery", phase="persist"
+    )
+    add_phase_node(graph, "hitl", intent_discovery_hitl, agent="intent_discovery", phase="process")
+    add_phase_node(graph, "persist_kb", intent_discovery_persist_kb, agent="intent_discovery", phase="persist")
+    add_phase_node(graph, "summarize", intent_discovery_summarize, agent="intent_discovery", phase="summarize")
+    graph.add_edge(START, "query")
+    graph.add_edge("query", "discover")
+    graph.add_edge("discover", "validate")
+    graph.add_edge("validate", "persist_proposal")
+    graph.add_edge("persist_proposal", "hitl")
+    graph.add_edge("hitl", "persist_kb")
+    graph.add_edge("persist_kb", "summarize")
+    graph.add_edge("summarize", END)
+    return graph.compile(name="discover_intents")
+
+
+def subflow_discovery_query(state: MetaAgentState) -> dict[str, Any]:
+    ids = runtime.store.unresolved_subflow_ids(state["run_id"])
+    runtime.store.set_workset(state["run_id"], "subflow_discovery", ids)
+    return {"current_stage": "subflow_discovery.query"}
+
+
+def subflow_discovery_discover(state: MetaAgentState) -> dict[str, Any]:
+    ids = runtime.store.get_workset(state["run_id"], "subflow_discovery")
+    intents = runtime.store.latest_intents(state["run_id"])
+    grouped: dict[str, list[str]] = {}
+    for tid in ids:
+        grouped.setdefault(intents[tid]["intent_id"], []).append(tid)
+    clusters = []
+    for intent_id, group in grouped.items():
+        for cluster in cluster_conversation_ids.invoke({"conversation_ids": group}):
+            clusters.append({"intent_id": intent_id, "task_ids": cluster})
+    runtime.store.set_staging(state["run_id"], "subflow_discovery_clusters", clusters)
+    return {"current_stage": "subflow_discovery.discover"}
+
+
+def subflow_discovery_validate(state: MetaAgentState) -> dict[str, Any]:
+    candidates = []
+    for cluster in runtime.store.get_staging(state["run_id"], "subflow_discovery_clusters"):
+        task_ids = cluster["task_ids"]
+        intent_id = cluster["intent_id"]
+        mean = mean_pairwise_jaccard(task_ids)
+        coherent = len(task_ids) >= MIN_CLUSTER_SIZE and mean >= CLUSTER_THRESHOLD
+        successful = [t for t in runtime.store.get_tasks(task_ids) if t["success"]]
+        if not coherent:
+            ptype = "outlier"
+            label, actions = None, []
+        elif len(successful) < MIN_SUCCESS_FOR_PATTERN:
+            ptype = "emerging"
+            label, actions = None, []
+        else:
+            sequences = [tuple(t["actions"]) for t in successful]
+            best, count = Counter(sequences).most_common(1)[0]
+            if best and count / len(successful) >= PATTERN_SUPPORT:
+                ptype = "new_subflow"
+                label, actions = propose_subflow_label(task_ids, "new_subflow")
+            else:
+                ptype = "emerging"
+                label, actions = None, []
+        candidates.append(
+            {
+                "proposal_type": ptype,
+                "candidate": label,
+                "parent_intent": intent_id,
+                "supporting_task_ids": task_ids,
+                "metrics": {
+                    "size": len(task_ids),
+                    "mean_jaccard": round(mean, 3),
+                    "successful": len(successful),
+                    "actions": actions,
+                    "coherent": coherent,
+                },
+            }
+        )
+    runtime.store.set_staging(state["run_id"], "subflow_discovery", candidates)
+    return {"current_stage": "subflow_discovery.validate"}
+
+
+def subflow_discovery_persist_proposal(state: MetaAgentState) -> dict[str, Any]:
+    pending_ids = []
+    for cand in runtime.store.get_staging(state["run_id"], "subflow_discovery"):
+        proposal_id = new_id("prop")
+        pending_ids.append(proposal_id)
+        runtime.store.persist_proposal(
+            {
+                "proposal_id": proposal_id,
+                "run_id": state["run_id"],
+                "proposal_type": cand["proposal_type"],
+                "candidate": cand["candidate"],
+                "parent_intent": cand["parent_intent"],
+                "supporting_task_ids": json.dumps(cand["supporting_task_ids"]),
+                "examples": json.dumps(_examples(cand["supporting_task_ids"])),
+                "metrics": json.dumps(cand["metrics"]),
+                "review_decision": None,
+                "review_note": None,
+                "resulting_kb_version": None,
+                "created_at": now_iso(),
+            }
+        )
+    runtime.store.set_staging(state["run_id"], "subflow_discovery_ids", pending_ids)
+    return {"current_stage": "subflow_discovery.persist_proposal", "pending_proposal_ids": pending_ids}
+
+
+def subflow_discovery_hitl(state: MetaAgentState) -> dict[str, Any]:
+    ids = runtime.store.get_staging(state["run_id"], "subflow_discovery_ids")
+    for proposal in runtime.store.list_proposals(state["run_id"]):
+        if proposal["proposal_id"] not in ids:
+            continue
+        decision, note = simulate_hitl(proposal)
+        runtime.store.decide_proposal(proposal["proposal_id"], decision, note)
+    return {"current_stage": "subflow_discovery.hitl"}
+
+
+def subflow_discovery_persist_kb(state: MetaAgentState) -> dict[str, Any]:
+    approved = list(state.get("approved_change_ids") or [])
+    ids = set(runtime.store.get_staging(state["run_id"], "subflow_discovery_ids") or [])
+    for proposal in runtime.store.list_proposals(state["run_id"], "new_subflow"):
+        if proposal["proposal_id"] not in ids or proposal["review_decision"] != "accept":
+            continue
+        metrics = json.loads(proposal["metrics"])
+        version = runtime.playbook.add_subflow(
+            proposal["parent_intent"],
+            proposal["candidate"],
+            metrics.get("actions") or [],
+        )
+        evidence_ids = json.loads(proposal["supporting_task_ids"])
+        runtime.store.persist_subflow_labels(
+            [
+                {
+                    "task_id": tid,
+                    "run_id": state["run_id"],
+                    "intent_id": proposal["parent_intent"],
+                    "subflow_id": proposal["candidate"],
+                    "confidence": 1.0,
+                    "method": "discovery_evidence_v1",
+                    "kb_version": version,
+                    "created_at": now_iso(),
+                }
+                for tid in evidence_ids
+            ]
+        )
+        runtime.store.log_kb_change(
+            version,
+            "add_subflow",
+            {
+                "intent": proposal["parent_intent"],
+                "subflow": proposal["candidate"],
+                "tasks": evidence_ids,
+            },
+        )
+        runtime.store.mark_proposal_kb_version(proposal["proposal_id"], version)
+        runtime.store.set_run_kb_version(state["run_id"], version)
+        approved.append(proposal["proposal_id"])
+    return {
+        "current_stage": "subflow_discovery.persist_kb",
+        "kb_version": runtime.playbook.version,
+        "approved_change_ids": approved,
+    }
+
+
+def subflow_discovery_summarize(state: MetaAgentState) -> dict[str, Any]:
+    ids = set(runtime.store.get_staging(state["run_id"], "subflow_discovery_ids") or [])
+    rows = [p for p in runtime.store.list_proposals(state["run_id"]) if p["proposal_id"] in ids]
+    summary = {
+        "unresolved_tasks": len(runtime.store.get_workset(state["run_id"], "subflow_discovery")),
+        "candidate_count": sum(1 for p in rows if p["proposal_type"] == "new_subflow"),
+        "emerging_count": sum(1 for p in rows if p["proposal_type"] == "emerging"),
+        "approved_count": sum(1 for p in rows if p["review_decision"] == "accept"),
+        "rejected_count": sum(1 for p in rows if p["review_decision"] == "decline"),
+    }
+    merged = dict(state.get("discovery_summary") or {})
+    merged["subflows"] = summary
+    return {"current_stage": "subflow_discovery.summarize", "discovery_summary": merged}
+
+
+def build_subflow_discovery_graph():
+    graph = StateGraph(MetaAgentState)
+    add_phase_node(graph, "query", subflow_discovery_query, agent="subflow_discovery", phase="query")
+    add_phase_node(graph, "discover", subflow_discovery_discover, agent="subflow_discovery", phase="process")
+    add_phase_node(graph, "validate", subflow_discovery_validate, agent="subflow_discovery", phase="process")
+    add_phase_node(
+        graph, "persist_proposal", subflow_discovery_persist_proposal, agent="subflow_discovery", phase="persist"
+    )
+    add_phase_node(graph, "hitl", subflow_discovery_hitl, agent="subflow_discovery", phase="process")
+    add_phase_node(graph, "persist_kb", subflow_discovery_persist_kb, agent="subflow_discovery", phase="persist")
+    add_phase_node(graph, "summarize", subflow_discovery_summarize, agent="subflow_discovery", phase="summarize")
+    graph.add_edge(START, "query")
+    graph.add_edge("query", "discover")
+    graph.add_edge("discover", "validate")
+    graph.add_edge("validate", "persist_proposal")
+    graph.add_edge("persist_proposal", "hitl")
+    graph.add_edge("hitl", "persist_kb")
+    graph.add_edge("persist_kb", "summarize")
+    graph.add_edge("summarize", END)
+    return graph.compile(name="discover_subflows")
+
+
+def pathway_query(state: MetaAgentState) -> dict[str, Any]:
+    subflow_id = state["target_subflow"]
+    latest = runtime.store.latest_subflows(state["run_id"])
+    ids = [tid for tid, row in latest.items() if row["subflow_id"] == subflow_id]
+    if not ids:
+        for proposal in runtime.store.list_proposals(state["run_id"], "new_subflow"):
+            if proposal["candidate"] == subflow_id and proposal["review_decision"] == "accept":
+                ids = json.loads(proposal["supporting_task_ids"])
+                break
+    runtime.store.set_workset(state["run_id"], f"pathway:{subflow_id}", ids)
+    return {"current_stage": "pathway.query"}
+
+
+def pathway_analyze(state: MetaAgentState) -> dict[str, Any]:
+    subflow_id = state["target_subflow"]
+    ids = runtime.store.get_workset(state["run_id"], f"pathway:{subflow_id}")
+    tasks = runtime.store.get_tasks(ids)
+    successful = [t for t in tasks if t["success"]]
+    sequences = [tuple(t["actions"]) for t in successful]
+    best, count = Counter(sequences).most_common(1)[0] if sequences else ((), 0)
+    payload = {
+        "task_ids": ids,
+        "successful": len(successful),
+        "actions": list(best),
+        "support": (count / len(successful)) if successful else 0.0,
+    }
+    runtime.store.set_staging(state["run_id"], f"pathway:{subflow_id}", payload)
+    return {"current_stage": "pathway.analyze"}
+
+
+def pathway_recommend(state: MetaAgentState) -> dict[str, Any]:
+    subflow_id = state["target_subflow"]
+    payload = dict(runtime.store.get_staging(state["run_id"], f"pathway:{subflow_id}"))
+    latest = runtime.store.latest_subflows(state["run_id"])
+    sample_id = (payload.get("task_ids") or [None])[0]
+    sample_row = latest.get(sample_id) if sample_id else None
+    intent_id = sample_row["intent_id"] if sample_row else None
+    if not intent_id:
+        for proposal in runtime.store.list_proposals(state["run_id"], "new_subflow"):
+            if proposal["candidate"] == subflow_id:
+                intent_id = proposal["parent_intent"]
+                break
+    flow_title = runtime.playbook.flow_title(intent_id or "new_intent")
+    actions = payload.get("actions") or []
+    payload["intent_id"] = intent_id
+    payload["kb_draft"] = draft_kb_stub.invoke({"subflow_id": subflow_id, "actions": actions})
+    payload["guideline_draft"] = draft_guideline_stub.invoke(
+        {
+            "flow_title": flow_title,
+            "subflow_title": runtime.playbook.subflow_titles.get(
+                subflow_id, subflow_id.replace("_", " ").title()
+            ),
+            "actions": actions,
+            "instructions": [
+                "Inferred from repeated successful traces in this batch.",
+                "Needs human review before it becomes live playbook text.",
+            ],
+        }
+    )
+    runtime.store.set_staging(state["run_id"], f"pathway:{subflow_id}", payload)
+    return {"current_stage": "pathway.recommend"}
+
+
+def pathway_evaluate(state: MetaAgentState) -> dict[str, Any]:
+    subflow_id = state["target_subflow"]
+    payload = dict(runtime.store.get_staging(state["run_id"], f"pathway:{subflow_id}"))
+    ok = (
+        payload.get("successful", 0) >= MIN_SUCCESS_FOR_PATTERN
+        and payload.get("support", 0) >= PATTERN_SUPPORT
+        and bool(payload.get("actions"))
+    )
+    payload["evaluation"] = {
+        "supported": ok,
+        "successful": payload.get("successful"),
+        "support": round(payload.get("support", 0.0), 3),
+    }
+    runtime.store.set_staging(state["run_id"], f"pathway:{subflow_id}", payload)
+    return {"current_stage": "pathway.evaluate"}
+
+
+def pathway_persist(state: MetaAgentState) -> dict[str, Any]:
+    subflow_id = state["target_subflow"]
+    payload = runtime.store.get_staging(state["run_id"], f"pathway:{subflow_id}")
+    rec_id = new_id("rec")
+    runtime.store.persist_recommendation(
+        {
+            "rec_id": rec_id,
+            "run_id": state["run_id"],
+            "intent_id": payload.get("intent_id") or "",
+            "subflow_id": subflow_id,
+            "supporting_task_ids": json.dumps(payload.get("task_ids") or []),
+            "kb_draft": json.dumps(payload.get("kb_draft") or {}),
+            "guideline_draft": json.dumps(payload.get("guideline_draft") or {}),
+            "evaluation": json.dumps(payload.get("evaluation") or {}),
+            "created_at": now_iso(),
+        }
+    )
+    if payload.get("evaluation", {}).get("supported") and payload.get("intent_id"):
+        version = runtime.playbook.attach_guideline(
+            payload["intent_id"], subflow_id, payload.get("guideline_draft") or {}
+        )
+        runtime.store.log_kb_change(version, "attach_guideline", {"subflow": subflow_id})
+        runtime.store.set_run_kb_version(state["run_id"], version)
+    runtime.store.set_staging(state["run_id"], f"pathway:{subflow_id}:rec_id", rec_id)
+    return {"current_stage": "pathway.persist", "kb_version": runtime.playbook.version}
+
+
+def pathway_summarize(state: MetaAgentState) -> dict[str, Any]:
+    subflow_id = state["target_subflow"]
+    payload = runtime.store.get_staging(state["run_id"], f"pathway:{subflow_id}")
+    item = {
+        "subflow_id": subflow_id,
+        "intent_id": payload.get("intent_id"),
+        "supported": payload.get("evaluation", {}).get("supported"),
+        "n_tasks": len(payload.get("task_ids") or []),
+        "support": payload.get("evaluation", {}).get("support"),
+    }
+    merged = dict(state.get("recommendation_summary") or {})
+    items = list(merged.get("items") or [])
+    items.append(item)
+    merged["items"] = items
+    merged["recommended"] = sum(1 for i in items if i.get("supported"))
+    return {
+        "current_stage": "pathway.summarize",
+        "recommendation_summary": merged,
+        "kb_version": runtime.playbook.version,
+    }
+
+
+def build_pathway_graph():
+    graph = StateGraph(MetaAgentState)
+    add_phase_node(graph, "query", pathway_query, agent="pathway", phase="query")
+    add_phase_node(graph, "analyze", pathway_analyze, agent="pathway", phase="process")
+    add_phase_node(graph, "recommend", pathway_recommend, agent="pathway", phase="process")
+    add_phase_node(graph, "evaluate", pathway_evaluate, agent="pathway", phase="process")
+    add_phase_node(graph, "persist", pathway_persist, agent="pathway", phase="persist")
+    add_phase_node(graph, "summarize", pathway_summarize, agent="pathway", phase="summarize")
+    graph.add_edge(START, "query")
+    graph.add_edge("query", "analyze")
+    graph.add_edge("analyze", "recommend")
+    graph.add_edge("recommend", "evaluate")
+    graph.add_edge("evaluate", "persist")
+    graph.add_edge("persist", "summarize")
+    graph.add_edge("summarize", END)
+    return graph.compile(name="recommend_pathway")
+
+
+def invoke_named(compiled, state: MetaAgentState, *, agent: str) -> MetaAgentState:
+    return compiled.invoke(state, config=run_config(state, agent=agent))
+
+
+def node_establish_cohort(state: MetaAgentState) -> dict[str, Any]:
+    return invoke_named(build_cohort_graph(), state, agent="meta")
+
+
+def node_classify_intents(state: MetaAgentState) -> dict[str, Any]:
+    return invoke_named(build_intent_graph(), state, agent="intent")
+
+
+def node_classify_subflows(state: MetaAgentState) -> dict[str, Any]:
+    return invoke_named(build_subflow_graph(), state, agent="subflow")
+
+
+def node_discover_intents(state: MetaAgentState) -> dict[str, Any]:
+    return invoke_named(build_intent_discovery_graph(), state, agent="intent_discovery")
+
+
+def node_reclassify_intents(state: MetaAgentState) -> dict[str, Any]:
+    return invoke_named(build_intent_graph(), state, agent="intent")
+
+
+def node_discover_subflows(state: MetaAgentState) -> dict[str, Any]:
+    return invoke_named(build_subflow_discovery_graph(), state, agent="subflow_discovery")
+
+
+def node_reclassify_subflows(state: MetaAgentState) -> dict[str, Any]:
+    return invoke_named(build_subflow_graph(), state, agent="subflow")
+
+
+def node_recommend(state: MetaAgentState) -> dict[str, Any]:
+    out = dict(state)
+    for proposal in runtime.store.list_proposals(state["run_id"], "new_subflow"):
+        if proposal["review_decision"] != "accept":
+            continue
+        out = invoke_named(
+            build_pathway_graph(),
+            {**out, "target_subflow": proposal["candidate"]},
+            agent="pathway",
+        )
+    return {
+        "current_stage": "recommend",
+        "recommendation_summary": out.get("recommendation_summary") or {"items": [], "recommended": 0},
+        "kb_version": runtime.playbook.version,
+    }
+
+
+def node_summarize_run(state: MetaAgentState) -> dict[str, Any]:
+    run_id = state["run_id"]
+    summary = {
+        "run_id": run_id,
+        "kb_version": runtime.playbook.version,
+        "cohort_size": len(runtime.store.cohort_ids(run_id)),
+        "intent_summary": state.get("intent_summary"),
+        "subflow_summary": state.get("subflow_summary"),
+        "discovery_summary": state.get("discovery_summary"),
+        "recommendation_summary": state.get("recommendation_summary"),
+        "intents_in_kb": runtime.playbook.intent_ids(),
+        "subflows_in_kb": runtime.playbook.ontology["intents"]["subflows"],
+        "unresolved_intents": runtime.store.unresolved_intent_ids(run_id),
+        "unresolved_subflows": runtime.store.unresolved_subflow_ids(run_id),
+    }
+    runtime.store.set_staging(run_id, "run_summary", summary)
+    return {"current_stage": "summarize", "run_id": run_id, "kb_version": runtime.playbook.version}
+
+
+def build_classify_graph(use_compiled: bool):
+    graph = StateGraph(MetaAgentState)
+    if use_compiled:
+        graph.add_node("classify_intents", build_intent_graph(), metadata={"agent": "intent", "phase": "process"})
+        graph.add_node("classify_subflows", build_subflow_graph(), metadata={"agent": "subflow", "phase": "process"})
+    else:
+        graph.add_node("classify_intents", node_classify_intents, metadata={"agent": "intent", "phase": "process"})
+        graph.add_node("classify_subflows", node_classify_subflows, metadata={"agent": "subflow", "phase": "process"})
+    graph.add_edge(START, "classify_intents")
+    graph.add_edge("classify_intents", "classify_subflows")
+    graph.add_edge("classify_subflows", END)
+    return graph.compile(name="classify")
+
+
+def build_discover_graph(use_compiled: bool):
+    graph = StateGraph(MetaAgentState)
+    if use_compiled:
+        graph.add_node(
+            "discover_intents", build_intent_discovery_graph(), metadata={"agent": "intent_discovery", "phase": "process"}
+        )
+        graph.add_node("reclassify_intents", build_intent_graph(), metadata={"agent": "intent", "phase": "process"})
+        graph.add_node(
+            "discover_subflows",
+            build_subflow_discovery_graph(),
+            metadata={"agent": "subflow_discovery", "phase": "process"},
+        )
+        graph.add_node("reclassify_subflows", build_subflow_graph(), metadata={"agent": "subflow", "phase": "process"})
+    else:
+        graph.add_node(
+            "discover_intents", node_discover_intents, metadata={"agent": "intent_discovery", "phase": "process"}
+        )
+        graph.add_node("reclassify_intents", node_reclassify_intents, metadata={"agent": "intent", "phase": "process"})
+        graph.add_node(
+            "discover_subflows", node_discover_subflows, metadata={"agent": "subflow_discovery", "phase": "process"}
+        )
+        graph.add_node("reclassify_subflows", node_reclassify_subflows, metadata={"agent": "subflow", "phase": "process"})
+    graph.add_edge(START, "discover_intents")
+    graph.add_edge("discover_intents", "reclassify_intents")
+    graph.add_edge("reclassify_intents", "discover_subflows")
+    graph.add_edge("discover_subflows", "reclassify_subflows")
+    graph.add_edge("reclassify_subflows", END)
+    return graph.compile(name="discover")
+
+
+def build_meta_graph(use_compiled: bool):
+    graph = StateGraph(MetaAgentState)
+    graph.add_node("establish_cohort", node_establish_cohort, metadata={"agent": "meta", "phase": "query"})
+    if use_compiled:
+        graph.add_node("classify", build_classify_graph(True), metadata={"agent": "meta", "phase": "process"})
+        graph.add_node("discover", build_discover_graph(True), metadata={"agent": "meta", "phase": "process"})
+    else:
+        graph.add_node("classify", build_classify_graph(False), metadata={"agent": "meta", "phase": "process"})
+        graph.add_node("discover", build_discover_graph(False), metadata={"agent": "meta", "phase": "process"})
+    graph.add_node("recommend", node_recommend, metadata={"agent": "pathway", "phase": "process"})
+    graph.add_node("summarize", node_summarize_run, metadata={"agent": "meta", "phase": "summarize"})
+    graph.add_edge(START, "establish_cohort")
+    graph.add_edge("establish_cohort", "classify")
+    graph.add_edge("classify", "discover")
+    graph.add_edge("discover", "recommend")
+    graph.add_edge("recommend", "summarize")
+    graph.add_edge("summarize", END)
+    return graph.compile(name="meta_agent")
+
+
+def build_graph(use_compiled: bool = False):
+    return build_meta_graph(use_compiled)
+
+
+def invoke_week(run_id: str, cohort_query: dict[str, Any] | None = None, *, compiled=None) -> MetaAgentState:
+    graph = compiled or build_meta_graph(False)
+    return invoke_named(
+        graph,
+        empty_state(run_id=run_id, cohort_query=cohort_query or {}),
+        agent="meta",
+    )

@@ -1,0 +1,127 @@
+"""Canonical playbook / KB load and retrieval."""
+
+from __future__ import annotations
+
+import json
+from copy import deepcopy
+from pathlib import Path
+from typing import Any
+
+from playbook.scoring import jaccard
+
+DEFAULT_DATA_DIR = Path(__file__).resolve().parents[2] / "scratch_data"
+
+DEFAULT_FLOW_TITLES = {"account_access": "Account Access"}
+DEFAULT_SUBFLOW_TITLES = {
+    "recover_username": "Recover Username",
+    "recover_password": "Recover Password",
+    "reset_2fa": "Reset Two-Factor Auth",
+    "missing": "Missing Item",
+}
+
+
+class PlaybookKB:
+    def __init__(
+        self,
+        ontology: dict,
+        kb: dict,
+        guidelines: dict,
+        version: int = 1,
+        flow_titles: dict[str, str] | None = None,
+        subflow_titles: dict[str, str] | None = None,
+    ):
+        self.ontology = deepcopy(ontology)
+        self.kb = deepcopy(kb)
+        self.guidelines = deepcopy(guidelines)
+        self.version = version
+        self.flow_titles = dict(flow_titles or DEFAULT_FLOW_TITLES)
+        self.subflow_titles = dict(subflow_titles or DEFAULT_SUBFLOW_TITLES)
+        self.title_to_flow_id = {title: flow_id for flow_id, title in self.flow_titles.items()}
+
+    def intent_ids(self) -> list[str]:
+        return list(self.ontology["intents"]["flows"])
+
+    def subflows_for(self, intent_id: str) -> list[str]:
+        return list(self.ontology["intents"]["subflows"].get(intent_id, []))
+
+    def flow_title(self, intent_id: str) -> str:
+        return self.flow_titles.get(intent_id, intent_id.replace("_", " ").title())
+
+    def intent_doc(self, intent_id: str) -> str:
+        title = self.flow_title(intent_id)
+        body = self.guidelines.get(title, {})
+        subflow_titles = list(body.get("subflows", {}) or [])
+        subflow_ids = self.subflows_for(intent_id)
+        return " ".join(
+            [title, intent_id, body.get("description", ""), *subflow_titles, *subflow_ids]
+        )
+
+    def add_intent(self, intent_id: str, title: str, description: str) -> int:
+        if intent_id not in self.ontology["intents"]["flows"]:
+            self.ontology["intents"]["flows"].append(intent_id)
+        self.ontology["intents"]["subflows"].setdefault(intent_id, [])
+        self.flow_titles[intent_id] = title
+        self.title_to_flow_id[title] = intent_id
+        self.guidelines.setdefault(title, {"description": description, "subflows": {}})
+        self.guidelines[title]["description"] = description
+        self.version += 1
+        return self.version
+
+    def add_subflow(self, intent_id: str, subflow_id: str, actions: list[str]) -> int:
+        existing = self.ontology["intents"]["subflows"].setdefault(intent_id, [])
+        if subflow_id not in existing:
+            existing.append(subflow_id)
+        self.kb[subflow_id] = list(actions)
+        self.version += 1
+        return self.version
+
+    def attach_guideline(self, intent_id: str, subflow_id: str, draft: dict[str, Any]) -> int:
+        title = self.flow_title(intent_id)
+        self.guidelines.setdefault(title, {"description": "", "subflows": {}})
+        self.guidelines[title].setdefault("subflows", {})
+        sub_title = self.subflow_titles.get(subflow_id, subflow_id.replace("_", " ").title())
+        incoming = draft.get(title, {}).get("subflows", {})
+        block = incoming.get(sub_title) or next(iter(incoming.values()), {})
+        self.guidelines[title]["subflows"][sub_title] = block
+        self.version += 1
+        return self.version
+
+
+def load_playbook(data_dir: Path | None = None) -> PlaybookKB:
+    root = Path(data_dir) if data_dir is not None else DEFAULT_DATA_DIR
+    ontology = json.loads((root / "seed_ontology.json").read_text(encoding="utf-8"))
+    kb = json.loads((root / "seed_kb.json").read_text(encoding="utf-8"))
+    guidelines = json.loads((root / "seed_guidelines.json").read_text(encoding="utf-8"))
+    return PlaybookKB(ontology, kb, guidelines)
+
+
+def load_conversations(data_dir: Path | None = None) -> list[dict[str, Any]]:
+    root = Path(data_dir) if data_dir is not None else DEFAULT_DATA_DIR
+    return json.loads((root / "incoming_conversations.json").read_text(encoding="utf-8"))
+
+
+def retrieve_guidance(
+    query: str,
+    playbook: PlaybookKB | None = None,
+    *,
+    top_k: int = 4,
+) -> list[dict[str, Any]]:
+    """Rank current playbook intents by Jaccard against query text."""
+    kb = playbook
+    if kb is None:
+        from playbook import runtime
+
+        kb = runtime.playbook
+    ranked = []
+    for intent_id in kb.intent_ids():
+        doc = kb.intent_doc(intent_id)
+        ranked.append(
+            {
+                "intent_id": intent_id,
+                "score": round(jaccard(query, doc), 3),
+                "doc": doc,
+                "subflows": kb.subflows_for(intent_id),
+            }
+        )
+    ranked.sort(key=lambda row: row["score"], reverse=True)
+    return ranked[:top_k]

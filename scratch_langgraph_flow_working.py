@@ -16,6 +16,10 @@
 # %% [markdown]
 # # Scratch: playbook-maintenance LangGraph (flow EDA)
 #
+# Historical EDA notebook. The supported implementation is `src/playbook/`
+# (reviewed by `scratch_modular_meta_agent`). This file keeps the earlier
+# parent + subflow-subgraph sketch for provenance.
+#
 # Worktree-local notebook. Goal is to **see the control flow**, not to implement real
 # retrieval, BERTopic, or LLM judges yet. Nodes and tools are stubs / pass-throughs.
 #
