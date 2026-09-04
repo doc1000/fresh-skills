@@ -1,13 +1,20 @@
 [project]
 name = "fresh-skills"
 version = "0.1.0"
-description = "Weekly playbook-maintenance agent (LangGraph EDA / agent cleanup)"
+description = "Weekly playbook-maintenance agent (LangGraph + BERTopic integration)"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "bertopic>=0.16",
+    "duckdb>=1.2",
+    "ipywidgets>=8.1.9",
     "langchain-core>=1.6.1",
     "langgraph>=1.2.11",
     "langsmith>=0.11.2",
+    "matplotlib>=3.11.1",
+    "pyarrow>=17.0",
+    "pydantic>=2.0",
+    "python-dotenv>=1.0",
 ]
 
 [build-system]

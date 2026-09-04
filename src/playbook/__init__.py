@@ -1,4 +1,4 @@
-"""LangGraph playbook-maintenance agent."""
+"""LangGraph playbook-maintenance agent with callable DS discovery."""
 
 from playbook.graph import (
     MetaAgentState,

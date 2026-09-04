@@ -14,3 +14,9 @@ wheels/
 # Local demo stores
 scratch_data/*.sqlite
 scratch_data/*.sqlite-journal
+
+# ABCD raw dump (regenerate with scripts/download_abcd.py)
+data/raw/*.json
+data/raw/*.gz
+data/raw/*.part
+!data/raw/.gitkeep
