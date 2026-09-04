@@ -83,7 +83,6 @@ def test_playbook_loader_and_retriever_are_independent():
 
 def test_langchain_tools_are_callable(runtime):
     from playbook.tools import (
-        cluster_conversation_ids,
         draft_guideline_stub,
         draft_kb_stub,
         score_intent_similarity,
@@ -102,10 +101,6 @@ def test_langchain_tools_are_callable(runtime):
     assert intent > 0
     assert username > password
 
-    clusters = cluster_conversation_ids.invoke({"conversation_ids": ["t1", "t2", "x1"]})
-    assert isinstance(clusters, list)
-    assert all(isinstance(group, list) for group in clusters)
-
     kb_draft = draft_kb_stub.invoke({"subflow_id": "reset_2fa", "actions": ["pull-up-account"]})
     guideline = draft_guideline_stub.invoke(
         {
@@ -119,7 +114,7 @@ def test_langchain_tools_are_callable(runtime):
     assert "Account Access" in guideline
 
 
-def test_agent_flow_reaches_decision_and_review_states(runtime):
+def test_agent_flow_reaches_decision_and_review_states(runtime, stub_topic_fit):
     from playbook import invoke_week, simulate_hitl
     from playbook import runtime as rt
 

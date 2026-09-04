@@ -11,20 +11,27 @@ from typing import Annotated, Any, TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from playbook import runtime
+from playbook.actions import discover_action_paths
+from playbook.adapters import (
+    RUNTIME_TOPIC_CONFIG,
+    action_paths_to_state,
+    discovered_topics_from_clusters,
+    tasks_to_conversations,
+    topic_result_to_clusters,
+)
+from playbook.kb import retrieve_guidance
 from playbook.scoring import (
-    CLUSTER_THRESHOLD,
     INTENT_THRESHOLD,
     LOW_INTENT_BAND,
     LOW_SUBFLOW_BAND,
-    MIN_CLUSTER_SIZE,
     MIN_SUCCESS_FOR_PATTERN,
     PATTERN_SUPPORT,
     SUBFLOW_THRESHOLD,
     jaccard,
 )
 from playbook.store import now_iso
+from playbook.topics import discover_intent_topics, discover_subflow_topics
 from playbook.tools import (
-    cluster_conversation_ids,
     draft_guideline_stub,
     draft_kb_stub,
     score_intent_similarity,
@@ -44,6 +51,10 @@ class MetaAgentState(TypedDict, total=False):
     recommendation_summary: dict[str, Any]
     pending_proposal_ids: list[str]
     approved_change_ids: list[str]
+    discovered_topics: list[dict[str, Any]]
+    discovered_subflows: list[dict[str, Any]]
+    action_paths: list[dict[str, Any]]
+    retrieved_guidance: list[dict[str, Any]]
     errors: Annotated[list[dict[str, Any]], operator.add]
 
 
@@ -79,10 +90,60 @@ def empty_state(**kwargs: Any) -> MetaAgentState:
         "recommendation_summary": {},
         "pending_proposal_ids": [],
         "approved_change_ids": [],
+        "discovered_topics": [],
+        "discovered_subflows": [],
+        "action_paths": [],
+        "retrieved_guidance": [],
         "errors": [],
     }
     state.update(kwargs)
     return state
+
+
+def _conversations_for(task_ids: list[str]):
+    return tasks_to_conversations(runtime.store.get_tasks(task_ids))
+
+
+def _retrieve_for_topics(topics: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for topic in topics:
+        query = topic.get("descriptor") or ""
+        if not query:
+            query = " ".join(topic.get("representative_conversation_ids") or [])
+        rows.append(
+            {
+                "topic_id": topic["topic_id"],
+                "query": query,
+                "hits": retrieve_guidance(query),
+            }
+        )
+    return rows
+
+
+def _run_topic_discovery(
+    task_ids: list[str],
+    *,
+    intent: str | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    conversations = _conversations_for(task_ids)
+    if intent is None:
+        result = discover_intent_topics(conversations, config=RUNTIME_TOPIC_CONFIG)
+    else:
+        result = discover_subflow_topics(conversations, intent=intent, config=RUNTIME_TOPIC_CONFIG)
+    clusters = topic_result_to_clusters(result)
+    if intent is not None:
+        for cluster in clusters:
+            cluster["intent_id"] = intent
+    return clusters, discovered_topics_from_clusters(clusters)
+
+
+def _merge_retrieved_guidance(
+    state: MetaAgentState,
+    topics: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    retrieved = list(state.get("retrieved_guidance") or [])
+    retrieved.extend(_retrieve_for_topics(topics))
+    return retrieved
 
 
 def run_config(state: MetaAgentState, *, agent: str) -> dict[str, Any]:
@@ -419,26 +480,36 @@ def intent_discovery_query(state: MetaAgentState) -> dict[str, Any]:
 
 def intent_discovery_discover(state: MetaAgentState) -> dict[str, Any]:
     ids = runtime.store.get_workset(state["run_id"], "intent_discovery")
-    clusters = cluster_conversation_ids.invoke({"conversation_ids": ids}) if ids else []
+    clusters, topics = _run_topic_discovery(ids)
     runtime.store.set_staging(state["run_id"], "intent_discovery_clusters", clusters)
-    return {"current_stage": "intent_discovery.discover"}
+    return {
+        "current_stage": "intent_discovery.discover",
+        "discovered_topics": topics,
+        "retrieved_guidance": _merge_retrieved_guidance(state, topics),
+    }
 
 
 def intent_discovery_validate(state: MetaAgentState) -> dict[str, Any]:
     clusters = runtime.store.get_staging(state["run_id"], "intent_discovery_clusters")
     candidates = []
     for cluster in clusters:
-        mean = mean_pairwise_jaccard(cluster)
-        coherent = len(cluster) >= MIN_CLUSTER_SIZE and mean >= CLUSTER_THRESHOLD
+        task_ids = cluster["task_ids"]
+        coherent = bool(cluster.get("cohesive_enough"))
+        mean = mean_pairwise_jaccard(task_ids)
         if coherent:
-            label = propose_intent_label(cluster)
+            label = propose_intent_label(task_ids)
             candidates.append(
                 {
                     "proposal_type": "new_intent",
                     "candidate": label,
                     "parent_intent": None,
-                    "supporting_task_ids": cluster,
-                    "metrics": {"size": len(cluster), "mean_jaccard": round(mean, 3), "coherent": True},
+                    "supporting_task_ids": task_ids,
+                    "metrics": {
+                        "size": len(task_ids),
+                        "mean_jaccard": round(mean, 3),
+                        "coherent": True,
+                        "source": "discover_intent_topics",
+                    },
                 }
             )
         else:
@@ -447,8 +518,13 @@ def intent_discovery_validate(state: MetaAgentState) -> dict[str, Any]:
                     "proposal_type": "outlier",
                     "candidate": None,
                     "parent_intent": None,
-                    "supporting_task_ids": cluster,
-                    "metrics": {"size": len(cluster), "mean_jaccard": round(mean, 3), "coherent": False},
+                    "supporting_task_ids": task_ids,
+                    "metrics": {
+                        "size": len(task_ids),
+                        "mean_jaccard": round(mean, 3),
+                        "coherent": False,
+                        "source": "discover_intent_topics",
+                    },
                 }
             )
     runtime.store.set_staging(state["run_id"], "intent_discovery", candidates)
@@ -583,12 +659,18 @@ def subflow_discovery_discover(state: MetaAgentState) -> dict[str, Any]:
     grouped: dict[str, list[str]] = {}
     for tid in ids:
         grouped.setdefault(intents[tid]["intent_id"], []).append(tid)
-    clusters = []
+    clusters: list[dict[str, Any]] = []
+    topics: list[dict[str, Any]] = []
     for intent_id, group in grouped.items():
-        for cluster in cluster_conversation_ids.invoke({"conversation_ids": group}):
-            clusters.append({"intent_id": intent_id, "task_ids": cluster})
+        group_clusters, group_topics = _run_topic_discovery(group, intent=intent_id)
+        clusters.extend(group_clusters)
+        topics.extend(group_topics)
     runtime.store.set_staging(state["run_id"], "subflow_discovery_clusters", clusters)
-    return {"current_stage": "subflow_discovery.discover"}
+    return {
+        "current_stage": "subflow_discovery.discover",
+        "discovered_subflows": topics,
+        "retrieved_guidance": _merge_retrieved_guidance(state, topics),
+    }
 
 
 def subflow_discovery_validate(state: MetaAgentState) -> dict[str, Any]:
@@ -597,7 +679,7 @@ def subflow_discovery_validate(state: MetaAgentState) -> dict[str, Any]:
         task_ids = cluster["task_ids"]
         intent_id = cluster["intent_id"]
         mean = mean_pairwise_jaccard(task_ids)
-        coherent = len(task_ids) >= MIN_CLUSTER_SIZE and mean >= CLUSTER_THRESHOLD
+        coherent = bool(cluster.get("cohesive_enough"))
         successful = [t for t in runtime.store.get_tasks(task_ids) if t["success"]]
         if not coherent:
             ptype = "outlier"
@@ -606,9 +688,10 @@ def subflow_discovery_validate(state: MetaAgentState) -> dict[str, Any]:
             ptype = "emerging"
             label, actions = None, []
         else:
-            sequences = [tuple(t["actions"]) for t in successful]
-            best, count = Counter(sequences).most_common(1)[0]
-            if best and count / len(successful) >= PATTERN_SUPPORT:
+            path_result = discover_action_paths(tasks_to_conversations(successful))
+            best = path_result.paths[0] if path_result.paths else None
+            support = (best.count / path_result.n_conversations) if best and path_result.n_conversations else 0.0
+            if best and best.actions and support >= PATTERN_SUPPORT:
                 ptype = "new_subflow"
                 label, actions = propose_subflow_label(task_ids, "new_subflow")
             else:
@@ -626,6 +709,7 @@ def subflow_discovery_validate(state: MetaAgentState) -> dict[str, Any]:
                     "successful": len(successful),
                     "actions": actions,
                     "coherent": coherent,
+                    "source": "discover_subflow_topics",
                 },
             }
         )
@@ -770,16 +854,18 @@ def pathway_analyze(state: MetaAgentState) -> dict[str, Any]:
     ids = runtime.store.get_workset(state["run_id"], f"pathway:{subflow_id}")
     tasks = runtime.store.get_tasks(ids)
     successful = [t for t in tasks if t["success"]]
-    sequences = [tuple(t["actions"]) for t in successful]
-    best, count = Counter(sequences).most_common(1)[0] if sequences else ((), 0)
+    path_result = discover_action_paths(tasks_to_conversations(successful))
+    best = path_result.paths[0] if path_result.paths else None
     payload = {
         "task_ids": ids,
-        "successful": len(successful),
-        "actions": list(best),
-        "support": (count / len(successful)) if successful else 0.0,
+        "successful": path_result.n_conversations,
+        "actions": list(best.actions) if best else [],
+        "support": (best.count / path_result.n_conversations) if best and path_result.n_conversations else 0.0,
     }
     runtime.store.set_staging(state["run_id"], f"pathway:{subflow_id}", payload)
-    return {"current_stage": "pathway.analyze"}
+    merged_paths = list(state.get("action_paths") or [])
+    merged_paths.extend(action_paths_to_state(path_result))
+    return {"current_stage": "pathway.analyze", "action_paths": merged_paths}
 
 
 def pathway_recommend(state: MetaAgentState) -> dict[str, Any]:
@@ -945,6 +1031,7 @@ def node_recommend(state: MetaAgentState) -> dict[str, Any]:
         "current_stage": "recommend",
         "recommendation_summary": out.get("recommendation_summary") or {"items": [], "recommended": 0},
         "kb_version": runtime.playbook.version,
+        "action_paths": out.get("action_paths") or [],
     }
 
 

@@ -1,16 +1,23 @@
-# fresh-skills (LangGraph agent worktree)
+# fresh-skills (topic + agent integration worktree)
 
-Playbook-maintenance agent extracted from the modular meta-agent EDA.
+LangGraph playbook-maintenance agent with BERTopic discovery used as callable
+capabilities. Neither subsystem was redesigned.
 
 ```text
-notebook / UI
-     ↓ imports
-src/playbook
+weekly batch
      ↓
-build_graph / invoke_week / load_playbook / retrieve_guidance
+DS discover_intent_topics / discover_subflow_topics / discover_action_paths
+     ↓
+adapters → MetaAgentState
+     ↓
+load_playbook / retrieve_guidance
+     ↓
+existing classify → discover → recommend → HITL flow
 ```
 
-This worktree does **not** include BERTopic or the data-science topic-discovery contract.
+* **Agent owns** orchestration, graph state, KB/playbook loading, RAG, tools, HITL, persistence.
+* **DS owns** intent/topic discovery, subflow discovery, and action-path discovery.
+* `src/playbook/adapters.py` is the only boundary. BERTopic objects do not enter graph state.
 
 ## Setup
 
@@ -23,24 +30,22 @@ Copy `.env` if you want LangSmith traces (`LANGSMITH_API_KEY`, `LANGSMITH_PROJEC
 ## Primary workflow
 
 ```python
-from playbook import configure_runtime, invoke_week, load_playbook, retrieve_guidance
+from playbook import configure_runtime, invoke_week, retrieve_guidance
 
 configure_runtime()
 result = invoke_week("week-2026-09-01")
 ```
 
-Canonical seed files live in `scratch_data/`:
+Canonical runtime KB is still `scratch_data/seed_*.json` via `load_playbook` /
+`retrieve_guidance`. DS `data/raw/kb.json` is not a runtime source.
 
-- `seed_ontology.json`
-- `seed_kb.json`
-- `seed_guidelines.json`
-- `incoming_conversations.json`
+## Integration notebook
 
-## Review notebook
+`notebooks/integrate_topic_agent.ipynb` imports `src/playbook` and shows batch →
+topics → subflows → action paths → graph state → retrieved playbook → decision.
 
-`scratch_modular_meta_agent.ipynb` imports `src/playbook` and walks classify → discover → recommend.
-
-Older `scratch_langgraph_flow*.ipynb` notebooks are historical EDA.
+It also records the remaining mismatches (two batch sources, DS vs runtime
+cluster-size defaults, store labels vs `ConversationRecord`).
 
 ## Tests
 
