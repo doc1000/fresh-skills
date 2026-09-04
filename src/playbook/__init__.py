@@ -20,6 +20,7 @@ from playbook.graph import (
     render_mermaid,
     simulate_hitl,
 )
+from playbook.fill import catalog_abcd, current_kb_view, fill_kb_and_tasks
 from playbook.kb import PlaybookKB, load_conversations, load_playbook, retrieve_guidance
 from playbook.runtime import configure_runtime
 from playbook.store import TaskStore
@@ -39,8 +40,11 @@ __all__ = [
     "build_subflow_discovery_graph",
     "build_subflow_graph",
     "cohort_query",
+    "catalog_abcd",
     "configure_runtime",
+    "current_kb_view",
     "empty_state",
+    "fill_kb_and_tasks",
     "invoke_named",
     "invoke_week",
     "load_conversations",

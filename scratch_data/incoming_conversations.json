@@ -1,170 +1,470 @@
 [
   {
     "convo_id": "u1",
-    "scenario": {"flow": "account_access", "subflow": "recover_username"},
+    "scenario": {
+      "flow": "account_access",
+      "subflow": "recover_username"
+    },
     "original": [
-      {"speaker": "customer", "text": "I forgot my username and cannot log into my account."},
-      {"speaker": "agent", "text": "I can help recover your username. What is your full name or account ID?"},
-      {"speaker": "action", "text": "pull-up-account"},
-      {"speaker": "customer", "text": "Joyce Wu, account 88211."},
-      {"speaker": "agent", "text": "I will verify your identity with zip code and email."},
-      {"speaker": "action", "text": "verify-identity"},
-      {"speaker": "agent", "text": "Your username is jwu1. Anything else I can help with?"}
+      {
+        "speaker": "customer",
+        "text": "I forgot my username and cannot log into my account."
+      },
+      {
+        "speaker": "agent",
+        "text": "I can help recover your username. What is your full name or account ID?"
+      },
+      {
+        "speaker": "action",
+        "text": "pull-up-account"
+      },
+      {
+        "speaker": "customer",
+        "text": "Joyce Wu, account 88211."
+      },
+      {
+        "speaker": "agent",
+        "text": "I will verify your identity with zip code and email."
+      },
+      {
+        "speaker": "action",
+        "text": "verify-identity"
+      },
+      {
+        "speaker": "agent",
+        "text": "Your username is jwu1. Anything else I can help with?"
+      }
     ],
-    "success": true
+    "success": true,
+    "conversation_date": "2026-09-01"
   },
   {
     "convo_id": "p1",
-    "scenario": {"flow": "account_access", "subflow": "recover_password"},
+    "scenario": {
+      "flow": "account_access",
+      "subflow": "recover_password"
+    },
     "original": [
-      {"speaker": "customer", "text": "I need to reset my password. I know my username."},
-      {"speaker": "agent", "text": "Sure, let me pull up the account first."},
-      {"speaker": "action", "text": "pull-up-account"},
-      {"speaker": "agent", "text": "Please confirm your username so I can enter details."},
-      {"speaker": "action", "text": "enter-details"},
-      {"speaker": "agent", "text": "I cannot retrieve the old password, but I can generate a new one with your pin."},
-      {"speaker": "action", "text": "make-password"},
-      {"speaker": "agent", "text": "Your new password is set. Please sign in and change it."}
+      {
+        "speaker": "customer",
+        "text": "I need to reset my password. I know my username."
+      },
+      {
+        "speaker": "agent",
+        "text": "Sure, let me pull up the account first."
+      },
+      {
+        "speaker": "action",
+        "text": "pull-up-account"
+      },
+      {
+        "speaker": "agent",
+        "text": "Please confirm your username so I can enter details."
+      },
+      {
+        "speaker": "action",
+        "text": "enter-details"
+      },
+      {
+        "speaker": "agent",
+        "text": "I cannot retrieve the old password, but I can generate a new one with your pin."
+      },
+      {
+        "speaker": "action",
+        "text": "make-password"
+      },
+      {
+        "speaker": "agent",
+        "text": "Your new password is set. Please sign in and change it."
+      }
     ],
-    "success": true
+    "success": true,
+    "conversation_date": "2026-09-01"
   },
   {
     "convo_id": "t1",
-    "scenario": {"flow": "account_access", "subflow": "reset_2fa"},
+    "scenario": {
+      "flow": "account_access",
+      "subflow": "reset_2fa"
+    },
     "original": [
-      {"speaker": "customer", "text": "I lost my authenticator app and cannot complete two-factor login."},
-      {"speaker": "agent", "text": "I can reset two-factor authentication. Let me pull up your account."},
-      {"speaker": "action", "text": "pull-up-account"},
-      {"speaker": "customer", "text": "Email on file is joyce.wu@example.com."},
-      {"speaker": "agent", "text": "I will enter that email so we can send a reset code."},
-      {"speaker": "action", "text": "enter-details"},
-      {"speaker": "agent", "text": "I am sending a two-factor reset link and a security best-practices note."},
-      {"speaker": "action", "text": "send-link"},
-      {"speaker": "customer", "text": "Got the reset code, I am back in."}
+      {
+        "speaker": "customer",
+        "text": "I lost my authenticator app and cannot complete two-factor login."
+      },
+      {
+        "speaker": "agent",
+        "text": "I can reset two-factor authentication. Let me pull up your account."
+      },
+      {
+        "speaker": "action",
+        "text": "pull-up-account"
+      },
+      {
+        "speaker": "customer",
+        "text": "Email on file is joyce.wu@example.com."
+      },
+      {
+        "speaker": "agent",
+        "text": "I will enter that email so we can send a reset code."
+      },
+      {
+        "speaker": "action",
+        "text": "enter-details"
+      },
+      {
+        "speaker": "agent",
+        "text": "I am sending a two-factor reset link and a security best-practices note."
+      },
+      {
+        "speaker": "action",
+        "text": "send-link"
+      },
+      {
+        "speaker": "customer",
+        "text": "Got the reset code, I am back in."
+      }
     ],
-    "success": true
+    "success": true,
+    "conversation_date": "2026-09-01"
   },
   {
     "convo_id": "t2",
-    "scenario": {"flow": "account_access", "subflow": "reset_2fa"},
+    "scenario": {
+      "flow": "account_access",
+      "subflow": "reset_2fa"
+    },
     "original": [
-      {"speaker": "customer", "text": "My phone died and the authenticator for two-factor authentication is gone."},
-      {"speaker": "agent", "text": "We can reset two-factor and email you a reset code."},
-      {"speaker": "action", "text": "pull-up-account"},
-      {"speaker": "customer", "text": "Use the email already on the account."},
-      {"speaker": "action", "text": "enter-details"},
-      {"speaker": "action", "text": "send-link"},
-      {"speaker": "customer", "text": "Reset code arrived. Two-factor is working again."}
+      {
+        "speaker": "customer",
+        "text": "My phone died and the authenticator for two-factor authentication is gone."
+      },
+      {
+        "speaker": "agent",
+        "text": "We can reset two-factor and email you a reset code."
+      },
+      {
+        "speaker": "action",
+        "text": "pull-up-account"
+      },
+      {
+        "speaker": "customer",
+        "text": "Use the email already on the account."
+      },
+      {
+        "speaker": "action",
+        "text": "enter-details"
+      },
+      {
+        "speaker": "action",
+        "text": "send-link"
+      },
+      {
+        "speaker": "customer",
+        "text": "Reset code arrived. Two-factor is working again."
+      }
     ],
-    "success": true
+    "success": true,
+    "conversation_date": "2026-09-01"
   },
   {
     "convo_id": "t3",
-    "scenario": {"flow": "account_access", "subflow": "reset_2fa"},
+    "scenario": {
+      "flow": "account_access",
+      "subflow": "reset_2fa"
+    },
     "original": [
-      {"speaker": "customer", "text": "Need a two-factor reset code. New phone, old authenticator app is gone."},
-      {"speaker": "agent", "text": "I will pull up the account and email a two-factor reset link."},
-      {"speaker": "action", "text": "pull-up-account"},
-      {"speaker": "action", "text": "enter-details"},
-      {"speaker": "action", "text": "send-link"},
-      {"speaker": "agent", "text": "Check your email for the two-factor reset code and security link."},
-      {"speaker": "customer", "text": "That worked, thank you."}
+      {
+        "speaker": "customer",
+        "text": "Need a two-factor reset code. New phone, old authenticator app is gone."
+      },
+      {
+        "speaker": "agent",
+        "text": "I will pull up the account and email a two-factor reset link."
+      },
+      {
+        "speaker": "action",
+        "text": "pull-up-account"
+      },
+      {
+        "speaker": "action",
+        "text": "enter-details"
+      },
+      {
+        "speaker": "action",
+        "text": "send-link"
+      },
+      {
+        "speaker": "agent",
+        "text": "Check your email for the two-factor reset code and security link."
+      },
+      {
+        "speaker": "customer",
+        "text": "That worked, thank you."
+      }
     ],
-    "success": true
+    "success": true,
+    "conversation_date": "2026-09-01"
   },
   {
     "convo_id": "l1",
-    "scenario": {"flow": "account_access", "subflow": "account_locked_mixed"},
+    "scenario": {
+      "flow": "account_access",
+      "subflow": "account_locked_mixed"
+    },
     "original": [
-      {"speaker": "customer", "text": "My account is locked after too many failed login attempts. I cannot access my account."},
-      {"speaker": "agent", "text": "The lockout policy says wait 24 hours. There is no unlock button I can use."},
-      {"speaker": "customer", "text": "I have a meeting in ten minutes and I am still locked out of my account login."},
-      {"speaker": "agent", "text": "I am sorry, I cannot override the lockout timer or failed-login lock."}
+      {
+        "speaker": "customer",
+        "text": "My account is locked after too many failed login attempts. I cannot access my account."
+      },
+      {
+        "speaker": "agent",
+        "text": "The lockout policy says wait 24 hours. There is no unlock button I can use."
+      },
+      {
+        "speaker": "customer",
+        "text": "I have a meeting in ten minutes and I am still locked out of my account login."
+      },
+      {
+        "speaker": "agent",
+        "text": "I am sorry, I cannot override the lockout timer or failed-login lock."
+      }
     ],
-    "success": false
+    "success": false,
+    "conversation_date": "2026-09-01"
   },
   {
     "convo_id": "l2",
-    "scenario": {"flow": "account_access", "subflow": "account_locked_mixed"},
+    "scenario": {
+      "flow": "account_access",
+      "subflow": "account_locked_mixed"
+    },
     "original": [
-      {"speaker": "customer", "text": "Account locked after too many failed logins. I cannot access my account. Can you unlock it now?"},
-      {"speaker": "agent", "text": "I will escalate this lockout to the website team and hope they can unlock the account login."},
-      {"speaker": "action", "text": "notify-team"},
-      {"speaker": "agent", "text": "They have not replied. I still cannot unlock the failed-login lockout."},
-      {"speaker": "customer", "text": "This lockout is useless."}
+      {
+        "speaker": "customer",
+        "text": "Account locked after too many failed logins. I cannot access my account. Can you unlock it now?"
+      },
+      {
+        "speaker": "agent",
+        "text": "I will escalate this lockout to the website team and hope they can unlock the account login."
+      },
+      {
+        "speaker": "action",
+        "text": "notify-team"
+      },
+      {
+        "speaker": "agent",
+        "text": "They have not replied. I still cannot unlock the failed-login lockout."
+      },
+      {
+        "speaker": "customer",
+        "text": "This lockout is useless."
+      }
     ],
-    "success": false
+    "success": false,
+    "conversation_date": "2026-09-01"
   },
   {
     "convo_id": "l3",
-    "scenario": {"flow": "account_access", "subflow": "account_locked_mixed"},
+    "scenario": {
+      "flow": "account_access",
+      "subflow": "account_locked_mixed"
+    },
     "original": [
-      {"speaker": "customer", "text": "Locked out of my account after failed logins. I cannot access my account login."},
-      {"speaker": "agent", "text": "Try logging out and back in after a few minutes. I have no unlock for this lockout."},
-      {"speaker": "action", "text": "try-again"},
-      {"speaker": "customer", "text": "Still locked out after failed login attempts. I am hanging up."}
+      {
+        "speaker": "customer",
+        "text": "Locked out of my account after failed logins. I cannot access my account login."
+      },
+      {
+        "speaker": "agent",
+        "text": "Try logging out and back in after a few minutes. I have no unlock for this lockout."
+      },
+      {
+        "speaker": "action",
+        "text": "try-again"
+      },
+      {
+        "speaker": "customer",
+        "text": "Still locked out after failed login attempts. I am hanging up."
+      }
     ],
-    "success": false
+    "success": false,
+    "conversation_date": "2026-09-01"
   },
   {
     "convo_id": "s1",
-    "scenario": {"flow": "shipping_issue", "subflow": "missing"},
+    "scenario": {
+      "flow": "shipping_issue",
+      "subflow": "missing"
+    },
     "original": [
-      {"speaker": "customer", "text": "My package was marked delivered yesterday but it never arrived at my door."},
-      {"speaker": "agent", "text": "I can look up the shipment. What is your name or account ID?"},
-      {"speaker": "action", "text": "pull-up-account"},
-      {"speaker": "agent", "text": "Let me validate the purchase and check how long you have been waiting."},
-      {"speaker": "action", "text": "validate-purchase"},
-      {"speaker": "action", "text": "record-reason"},
-      {"speaker": "agent", "text": "It has been more than a week, so I will ship a replacement package."},
-      {"speaker": "action", "text": "update-order"},
-      {"speaker": "action", "text": "make-purchase"},
-      {"speaker": "customer", "text": "Great, please resend the Guess jeans."}
+      {
+        "speaker": "customer",
+        "text": "My package was marked delivered yesterday but it never arrived at my door."
+      },
+      {
+        "speaker": "agent",
+        "text": "I can look up the shipment. What is your name or account ID?"
+      },
+      {
+        "speaker": "action",
+        "text": "pull-up-account"
+      },
+      {
+        "speaker": "agent",
+        "text": "Let me validate the purchase and check how long you have been waiting."
+      },
+      {
+        "speaker": "action",
+        "text": "validate-purchase"
+      },
+      {
+        "speaker": "action",
+        "text": "record-reason"
+      },
+      {
+        "speaker": "agent",
+        "text": "It has been more than a week, so I will ship a replacement package."
+      },
+      {
+        "speaker": "action",
+        "text": "update-order"
+      },
+      {
+        "speaker": "action",
+        "text": "make-purchase"
+      },
+      {
+        "speaker": "customer",
+        "text": "Great, please resend the Guess jeans."
+      }
     ],
-    "success": true
+    "success": true,
+    "conversation_date": "2026-09-01"
   },
   {
     "convo_id": "s2",
-    "scenario": {"flow": "shipping_issue", "subflow": "missing"},
+    "scenario": {
+      "flow": "shipping_issue",
+      "subflow": "missing"
+    },
     "original": [
-      {"speaker": "customer", "text": "Tracking says delivered but the package is missing from my porch."},
-      {"speaker": "agent", "text": "Sorry about the missing shipment. I will validate the order."},
-      {"speaker": "action", "text": "pull-up-account"},
-      {"speaker": "action", "text": "validate-purchase"},
-      {"speaker": "customer", "text": "I have been waiting nine days."},
-      {"speaker": "action", "text": "record-reason"},
-      {"speaker": "agent", "text": "I will update the order and resend the package."},
-      {"speaker": "action", "text": "update-order"},
-      {"speaker": "action", "text": "make-purchase"},
-      {"speaker": "customer", "text": "Please send another Calvin Klein jacket."}
+      {
+        "speaker": "customer",
+        "text": "Tracking says delivered but the package is missing from my porch."
+      },
+      {
+        "speaker": "agent",
+        "text": "Sorry about the missing shipment. I will validate the order."
+      },
+      {
+        "speaker": "action",
+        "text": "pull-up-account"
+      },
+      {
+        "speaker": "action",
+        "text": "validate-purchase"
+      },
+      {
+        "speaker": "customer",
+        "text": "I have been waiting nine days."
+      },
+      {
+        "speaker": "action",
+        "text": "record-reason"
+      },
+      {
+        "speaker": "agent",
+        "text": "I will update the order and resend the package."
+      },
+      {
+        "speaker": "action",
+        "text": "update-order"
+      },
+      {
+        "speaker": "action",
+        "text": "make-purchase"
+      },
+      {
+        "speaker": "customer",
+        "text": "Please send another Calvin Klein jacket."
+      }
     ],
-    "success": true
+    "success": true,
+    "conversation_date": "2026-09-01"
   },
   {
     "convo_id": "s3",
-    "scenario": {"flow": "shipping_issue", "subflow": "missing"},
+    "scenario": {
+      "flow": "shipping_issue",
+      "subflow": "missing"
+    },
     "original": [
-      {"speaker": "customer", "text": "The carrier marked my package delivered and it is still missing."},
-      {"speaker": "agent", "text": "I will confirm the purchase and how many days you have waited."},
-      {"speaker": "action", "text": "pull-up-account"},
-      {"speaker": "action", "text": "validate-purchase"},
-      {"speaker": "action", "text": "record-reason"},
-      {"speaker": "agent", "text": "Past a week, so I am creating a replacement shipment."},
-      {"speaker": "action", "text": "update-order"},
-      {"speaker": "action", "text": "make-purchase"},
-      {"speaker": "customer", "text": "Thanks, resend the Tommy Hilfiger shirt."}
+      {
+        "speaker": "customer",
+        "text": "The carrier marked my package delivered and it is still missing."
+      },
+      {
+        "speaker": "agent",
+        "text": "I will confirm the purchase and how many days you have waited."
+      },
+      {
+        "speaker": "action",
+        "text": "pull-up-account"
+      },
+      {
+        "speaker": "action",
+        "text": "validate-purchase"
+      },
+      {
+        "speaker": "action",
+        "text": "record-reason"
+      },
+      {
+        "speaker": "agent",
+        "text": "Past a week, so I am creating a replacement shipment."
+      },
+      {
+        "speaker": "action",
+        "text": "update-order"
+      },
+      {
+        "speaker": "action",
+        "text": "make-purchase"
+      },
+      {
+        "speaker": "customer",
+        "text": "Thanks, resend the Tommy Hilfiger shirt."
+      }
     ],
-    "success": true
+    "success": true,
+    "conversation_date": "2026-09-01"
   },
   {
     "convo_id": "x1",
-    "scenario": {"flow": "outlier", "subflow": "store_window_display"},
+    "scenario": {
+      "flow": "outlier",
+      "subflow": "store_window_display"
+    },
     "original": [
-      {"speaker": "customer", "text": "Can you tell the downtown store to change the window merchandising to the spring boots collection this weekend?"},
-      {"speaker": "agent", "text": "Store window displays are handled by retail operations, not this support channel."},
-      {"speaker": "customer", "text": "Who do I call about merchandising?"},
-      {"speaker": "agent", "text": "I can only give you the general store phone number. I cannot change a window display from here."}
+      {
+        "speaker": "customer",
+        "text": "Can you tell the downtown store to change the window merchandising to the spring boots collection this weekend?"
+      },
+      {
+        "speaker": "agent",
+        "text": "Store window displays are handled by retail operations, not this support channel."
+      },
+      {
+        "speaker": "customer",
+        "text": "Who do I call about merchandising?"
+      },
+      {
+        "speaker": "agent",
+        "text": "I can only give you the general store phone number. I cannot change a window display from here."
+      }
     ],
-    "success": false
+    "success": false,
+    "conversation_date": "2026-09-01"
   }
 ]

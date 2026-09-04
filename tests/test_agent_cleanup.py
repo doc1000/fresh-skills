@@ -7,15 +7,30 @@ from pathlib import Path
 
 import pytest
 
+from playbook.topics import BertopicConfig
+
 ROOT = Path(__file__).resolve().parents[1]
 NOTEBOOK_PY = ROOT / "scratch_modular_meta_agent.py"
+DEMO_TOPIC_CONFIG = BertopicConfig(
+    min_to_cluster=2,
+    min_cluster_size=2,
+    min_samples=1,
+    min_topic_n=2,
+    representative_n=3,
+    n_neighbors=3,
+    n_components=2,
+)
 
 
 @pytest.fixture
 def runtime(tmp_path):
     from playbook import configure_runtime
 
-    return configure_runtime(store_path=tmp_path / "run_store.sqlite")
+    return configure_runtime(
+        store_path=tmp_path / "run_store.sqlite",
+        method="jaccard",
+        topic_config=DEMO_TOPIC_CONFIG,
+    )
 
 
 def test_graph_imports_and_compiles_outside_jupyter():
@@ -43,10 +58,15 @@ def test_nodes_receive_and_return_typed_state(runtime):
 
     state = empty_state(
         run_id="week-state-check",
-        cohort_query={"source": "scratch_data/incoming_conversations.json", "window": "demo-week"},
+        start="2026-09-01",
+        end="2026-09-07",
+        method="jaccard",
     )
     assert set(state) >= {
         "run_id",
+        "start",
+        "end",
+        "method",
         "cohort_query",
         "kb_version",
         "current_stage",
@@ -56,10 +76,9 @@ def test_nodes_receive_and_return_typed_state(runtime):
     }
     out = cohort_query(state)
     assert out["run_id"] == "week-state-check"
-    assert out["current_stage"] == "cohort.query"
-    assert isinstance(out, dict)
-    merged: MetaAgentState = {**state, **out}
-    assert merged["run_id"] == "week-state-check"
+    assert out["current_stage"] == "select_time_window"
+    assert out["start"] == "2026-09-01"
+    assert out["end"] == "2026-09-07"
 
 
 def test_playbook_loader_and_retriever_are_independent():
@@ -121,9 +140,9 @@ def test_agent_flow_reaches_decision_and_review_states(runtime, stub_topic_fit):
     result = invoke_week(
         "week-2026-09-01",
         {
-            "source": "scratch_data/incoming_conversations.json",
-            "window": "demo-week",
-            "as_of": "2026-09-01",
+            "start": "2026-09-01",
+            "end": "2026-09-07",
+            "method": "jaccard",
         },
     )
     assert result["current_stage"] == "summarize"

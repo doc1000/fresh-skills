@@ -34,7 +34,8 @@ class TaskStore:
                 success INTEGER NOT NULL,
                 hidden_flow TEXT,
                 hidden_subflow TEXT,
-                turns_json TEXT NOT NULL
+                turns_json TEXT NOT NULL,
+                conversation_date TEXT
             );
             CREATE TABLE runs (
                 run_id TEXT PRIMARY KEY,
@@ -128,13 +129,14 @@ class TaskStore:
                     convo.get("scenario", {}).get("flow"),
                     convo.get("scenario", {}).get("subflow"),
                     json.dumps(convo["original"]),
+                    convo.get("conversation_date"),
                 )
             )
         self.conn.executemany(
             """
             INSERT INTO tasks
-            (task_id, text, actions_json, success, hidden_flow, hidden_subflow, turns_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            (task_id, text, actions_json, success, hidden_flow, hidden_subflow, turns_json, conversation_date)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             rows,
         )

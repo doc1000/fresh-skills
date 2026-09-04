@@ -30,10 +30,19 @@ Copy `.env` if you want LangSmith traces (`LANGSMITH_API_KEY`, `LANGSMITH_PROJEC
 ## Primary workflow
 
 ```python
-from playbook import configure_runtime, invoke_week, retrieve_guidance
+from playbook import build_graph, configure_runtime, retrieve_guidance
 
-configure_runtime()
-result = invoke_week("week-2026-09-01")
+playbook, store = configure_runtime(method="jaccard")
+agent = build_graph()
+result = agent.invoke(
+    {
+        "run_id": "week-2026-09-01",
+        "start": "2026-09-01",
+        "end": "2026-09-07",
+        "method": "jaccard",
+        "kb_version": playbook.version,
+    }
+)
 ```
 
 Canonical runtime KB is still `scratch_data/seed_*.json` via `load_playbook` /
@@ -41,11 +50,9 @@ Canonical runtime KB is still `scratch_data/seed_*.json` via `load_playbook` /
 
 ## Integration notebook
 
-`notebooks/integrate_topic_agent.ipynb` imports `src/playbook` and shows batch →
-topics → subflows → action paths → graph state → retrieved playbook → decision.
-
-It also records the remaining mismatches (two batch sources, DS vs runtime
-cluster-size defaults, store labels vs `ConversationRecord`).
+`notebooks/integrate_topic_agent.ipynb` imports `src/playbook`, fills Agent KB
+files by hand, then calls `agent.invoke` with an explicit `start`/`end` window.
+`invoke_week` remains a thin test wrapper.
 
 ## Tests
 

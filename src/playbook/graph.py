@@ -15,7 +15,10 @@ from playbook.actions import discover_action_paths
 from playbook.adapters import (
     RUNTIME_TOPIC_CONFIG,
     action_paths_to_state,
+    classify_intents_bertopic,
+    classify_subflows_bertopic,
     discovered_topics_from_clusters,
+    jaccard_topic_result,
     tasks_to_conversations,
     topic_result_to_clusters,
 )
@@ -41,7 +44,11 @@ from playbook.tools import (
 
 class MetaAgentState(TypedDict, total=False):
     run_id: str
+    start: str
+    end: str
+    method: str
     cohort_query: dict[str, Any]
+    cohort_summary: dict[str, Any]
     kb_version: int
     current_stage: str
     target_subflow: str
@@ -80,7 +87,11 @@ def empty_state(**kwargs: Any) -> MetaAgentState:
     version = runtime.playbook.version if runtime.playbook is not None else 1
     state: MetaAgentState = {
         "run_id": "",
+        "start": "",
+        "end": "",
+        "method": runtime.method,
         "cohort_query": {},
+        "cohort_summary": {},
         "kb_version": version,
         "current_stage": "",
         "target_subflow": "",
@@ -120,16 +131,24 @@ def _retrieve_for_topics(topics: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return rows
 
 
+def _topic_config():
+    return runtime.topic_config or RUNTIME_TOPIC_CONFIG
+
+
 def _run_topic_discovery(
     task_ids: list[str],
     *,
     intent: str | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     conversations = _conversations_for(task_ids)
-    if intent is None:
-        result = discover_intent_topics(conversations, config=RUNTIME_TOPIC_CONFIG)
+    config = _topic_config()
+    if runtime.method == "bertopic":
+        if intent is None:
+            result = discover_intent_topics(conversations, config=config)
+        else:
+            result = discover_subflow_topics(conversations, intent=intent, config=config)
     else:
-        result = discover_subflow_topics(conversations, intent=intent, config=RUNTIME_TOPIC_CONFIG)
+        result = jaccard_topic_result(conversations, config=config, parent_intent=intent)
     clusters = topic_result_to_clusters(result)
     if intent is not None:
         for cluster in clusters:
@@ -206,23 +225,46 @@ def new_id(prefix: str) -> str:
 
 
 def cohort_query(state: MetaAgentState) -> dict[str, Any]:
-    query = dict(
-        state.get("cohort_query")
-        or {
-            "source": "scratch_data/incoming_conversations.json",
-            "window": "demo-week",
-            "as_of": "2026-09-01",
-        }
-    )
-    run_id = state.get("run_id") or f"week-{query.get('as_of', 'demo')}"
-    ids = [row["task_id"] for row in runtime.store.fetchall("SELECT task_id FROM tasks ORDER BY task_id")]
-    runtime.store.set_workset(run_id, "cohort", ids)
+    query = dict(state.get("cohort_query") or {})
+    start = state.get("start") or query.get("start")
+    end = state.get("end") or query.get("end")
+    method = state.get("method") or query.get("method") or runtime.method
+    if not start or not end:
+        raise ValueError("agent payload requires start and end (ISO dates YYYY-MM-DD)")
+    if start > end:
+        raise ValueError(f"start {start} is after end {end}")
+    runtime.method = method
+    query = {"start": start, "end": end, "method": method}
+    run_id = state.get("run_id") or f"run-{start}-to-{end}"
+    version = runtime.playbook.version if runtime.playbook is not None else state.get("kb_version", 1)
     runtime.store.set_staging(run_id, "cohort_query", query)
-    return {"run_id": run_id, "cohort_query": query, "current_stage": "cohort.query"}
+    return {
+        "run_id": run_id,
+        "start": start,
+        "end": end,
+        "method": method,
+        "cohort_query": query,
+        "kb_version": version,
+        "current_stage": "select_time_window",
+    }
 
 
 def cohort_process(state: MetaAgentState) -> dict[str, Any]:
-    return {"current_stage": "cohort.process"}
+    start = state["start"]
+    end = state["end"]
+    ids = [
+        row["task_id"]
+        for row in runtime.store.fetchall(
+            """
+            SELECT task_id FROM tasks
+            WHERE conversation_date >= ? AND conversation_date <= ?
+            ORDER BY task_id
+            """,
+            (start, end),
+        )
+    ]
+    runtime.store.set_workset(state["run_id"], "cohort", ids)
+    return {"current_stage": "load_window_conversations"}
 
 
 def cohort_persist(state: MetaAgentState) -> dict[str, Any]:
@@ -231,31 +273,52 @@ def cohort_persist(state: MetaAgentState) -> dict[str, Any]:
     ids = runtime.store.get_workset(run_id, "cohort")
     runtime.store.create_run(run_id, query, runtime.playbook.version)
     runtime.store.add_cohort(run_id, ids)
-    return {"current_stage": "cohort.persist", "kb_version": runtime.playbook.version}
+    return {"current_stage": "persist_cohort", "kb_version": runtime.playbook.version}
 
 
 def cohort_summarize(state: MetaAgentState) -> dict[str, Any]:
     ids = runtime.store.cohort_ids(state["run_id"])
-    summary = {"total": len(ids), "source": (state.get("cohort_query") or {}).get("source")}
+    dates = [
+        row["conversation_date"]
+        for row in runtime.store.get_tasks(ids)
+        if row.get("conversation_date")
+    ]
+    summary = {
+        "start": state.get("start"),
+        "end": state.get("end"),
+        "n": len(ids),
+        "min_conversation_date": min(dates) if dates else None,
+        "max_conversation_date": max(dates) if dates else None,
+        "method": state.get("method") or runtime.method,
+    }
     runtime.store.set_staging(state["run_id"], "cohort_summary", summary)
-    return {"current_stage": "cohort.summarize"}
+    return {"current_stage": "summarize_cohort", "cohort_summary": summary}
 
 
 def build_cohort_graph():
     graph = StateGraph(MetaAgentState)
-    add_phase_node(graph, "query", cohort_query, agent="meta", phase="query")
-    add_phase_node(graph, "process", cohort_process, agent="meta", phase="process")
-    add_phase_node(graph, "persist", cohort_persist, agent="meta", phase="persist")
-    add_phase_node(graph, "summarize", cohort_summarize, agent="meta", phase="summarize")
-    graph.add_edge(START, "query")
-    graph.add_edge("query", "process")
-    graph.add_edge("process", "persist")
-    graph.add_edge("persist", "summarize")
-    graph.add_edge("summarize", END)
+    add_phase_node(graph, "select_time_window", cohort_query, agent="meta", phase="query")
+    add_phase_node(graph, "load_window_conversations", cohort_process, agent="meta", phase="process")
+    add_phase_node(graph, "persist_cohort", cohort_persist, agent="meta", phase="persist")
+    add_phase_node(graph, "summarize_cohort", cohort_summarize, agent="meta", phase="summarize")
+    graph.add_edge(START, "select_time_window")
+    graph.add_edge("select_time_window", "load_window_conversations")
+    graph.add_edge("load_window_conversations", "persist_cohort")
+    graph.add_edge("persist_cohort", "summarize_cohort")
+    graph.add_edge("summarize_cohort", END)
     return graph.compile(name="establish_cohort")
 
 
 def classify_intents_process(task_ids: list[str]) -> list[dict[str, Any]]:
+    if runtime.method == "bertopic":
+        return classify_intents_bertopic(
+            _conversations_for(task_ids),
+            runtime.playbook,
+            runtime.seed_examples,
+            min_sim=runtime.min_sim,
+            min_margin=runtime.min_margin,
+            fit_rule=runtime.fit_rule,
+        )
     results = []
     intent_ids = runtime.playbook.intent_ids()
     for tid in task_ids:
@@ -282,13 +345,13 @@ def classify_intents_process(task_ids: list[str]) -> list[dict[str, Any]]:
 def intent_query(state: MetaAgentState) -> dict[str, Any]:
     ids = runtime.store.unresolved_intent_ids(state["run_id"])
     runtime.store.set_workset(state["run_id"], "intent", ids)
-    return {"current_stage": "intent.query"}
+    return {"current_stage": "select_unresolved_intents"}
 
 
 def intent_process(state: MetaAgentState) -> dict[str, Any]:
     ids = runtime.store.get_workset(state["run_id"], "intent")
     runtime.store.set_staging(state["run_id"], "intent", classify_intents_process(ids))
-    return {"current_stage": "intent.process"}
+    return {"current_stage": "score_intents"}
 
 
 def intent_persist(state: MetaAgentState) -> dict[str, Any]:
@@ -299,7 +362,7 @@ def intent_persist(state: MetaAgentState) -> dict[str, Any]:
             "run_id": state["run_id"],
             "intent_id": row["intent_id"],
             "confidence": row["confidence"],
-            "method": "jaccard_intent_doc_v1",
+            "method": "bertopic_prototype_v1" if runtime.method == "bertopic" else "jaccard_intent_doc_v1",
             "kb_version": runtime.playbook.version,
             "created_at": now_iso(),
         }
@@ -307,7 +370,7 @@ def intent_persist(state: MetaAgentState) -> dict[str, Any]:
     ]
     if rows:
         runtime.store.persist_intent_labels(rows)
-    return {"current_stage": "intent.persist", "kb_version": runtime.playbook.version}
+    return {"current_stage": "persist_intent_labels", "kb_version": runtime.playbook.version}
 
 
 def _intent_summary(run_id: str, processed: list[dict[str, Any]]) -> dict[str, Any]:
@@ -333,7 +396,7 @@ def intent_summarize(state: MetaAgentState) -> dict[str, Any]:
     processed = runtime.store.get_staging(state["run_id"], "intent")
     summary = _intent_summary(state["run_id"], processed)
     return {
-        "current_stage": "intent.summarize",
+        "current_stage": "summarize_intent_assignments",
         "intent_summary": summary,
         "kb_version": runtime.playbook.version,
     }
@@ -341,20 +404,31 @@ def intent_summarize(state: MetaAgentState) -> dict[str, Any]:
 
 def build_intent_graph():
     graph = StateGraph(MetaAgentState)
-    add_phase_node(graph, "query", intent_query, agent="intent", phase="query")
-    add_phase_node(graph, "process", intent_process, agent="intent", phase="process")
-    add_phase_node(graph, "persist", intent_persist, agent="intent", phase="persist")
-    add_phase_node(graph, "summarize", intent_summarize, agent="intent", phase="summarize")
-    graph.add_edge(START, "query")
-    graph.add_edge("query", "process")
-    graph.add_edge("process", "persist")
-    graph.add_edge("persist", "summarize")
-    graph.add_edge("summarize", END)
+    add_phase_node(graph, "select_unresolved_intents", intent_query, agent="intent", phase="query")
+    add_phase_node(graph, "score_intents", intent_process, agent="intent", phase="process")
+    add_phase_node(graph, "persist_intent_labels", intent_persist, agent="intent", phase="persist")
+    add_phase_node(graph, "summarize_intent_assignments", intent_summarize, agent="intent", phase="summarize")
+    graph.add_edge(START, "select_unresolved_intents")
+    graph.add_edge("select_unresolved_intents", "score_intents")
+    graph.add_edge("score_intents", "persist_intent_labels")
+    graph.add_edge("persist_intent_labels", "summarize_intent_assignments")
+    graph.add_edge("summarize_intent_assignments", END)
     return graph.compile(name="classify_intents")
 
 
 def classify_subflows_process(task_ids: list[str], run_id: str) -> list[dict[str, Any]]:
     latest_intents = runtime.store.latest_intents(run_id)
+    if runtime.method == "bertopic":
+        intent_by_task = {tid: latest_intents[tid]["intent_id"] for tid in task_ids}
+        return classify_subflows_bertopic(
+            _conversations_for(task_ids),
+            runtime.playbook,
+            runtime.seed_examples,
+            intent_by_task,
+            min_sim=runtime.min_sim,
+            min_margin=runtime.min_margin,
+            fit_rule=runtime.fit_rule,
+        )
     results = []
     for tid in task_ids:
         intent_id = latest_intents[tid]["intent_id"]
@@ -391,13 +465,13 @@ def classify_subflows_process(task_ids: list[str], run_id: str) -> list[dict[str
 def subflow_query(state: MetaAgentState) -> dict[str, Any]:
     ids = runtime.store.unresolved_subflow_ids(state["run_id"])
     runtime.store.set_workset(state["run_id"], "subflow", ids)
-    return {"current_stage": "subflow.query"}
+    return {"current_stage": "select_unresolved_subflows"}
 
 
 def subflow_process(state: MetaAgentState) -> dict[str, Any]:
     ids = runtime.store.get_workset(state["run_id"], "subflow")
     runtime.store.set_staging(state["run_id"], "subflow", classify_subflows_process(ids, state["run_id"]))
-    return {"current_stage": "subflow.process"}
+    return {"current_stage": "score_subflows"}
 
 
 def subflow_persist(state: MetaAgentState) -> dict[str, Any]:
@@ -409,7 +483,7 @@ def subflow_persist(state: MetaAgentState) -> dict[str, Any]:
             "intent_id": row["intent_id"],
             "subflow_id": row["subflow_id"],
             "confidence": row["confidence"],
-            "method": "lcs_kb_actions_v1",
+            "method": "bertopic_prototype_v1" if runtime.method == "bertopic" else "lcs_kb_actions_v1",
             "kb_version": runtime.playbook.version,
             "created_at": now_iso(),
         }
@@ -417,7 +491,7 @@ def subflow_persist(state: MetaAgentState) -> dict[str, Any]:
     ]
     if rows:
         runtime.store.persist_subflow_labels(rows)
-    return {"current_stage": "subflow.persist", "kb_version": runtime.playbook.version}
+    return {"current_stage": "persist_subflow_labels", "kb_version": runtime.playbook.version}
 
 
 def _subflow_summary(run_id: str, processed: list[dict[str, Any]]) -> dict[str, Any]:
@@ -445,7 +519,7 @@ def _subflow_summary(run_id: str, processed: list[dict[str, Any]]) -> dict[str, 
 def subflow_summarize(state: MetaAgentState) -> dict[str, Any]:
     processed = runtime.store.get_staging(state["run_id"], "subflow")
     return {
-        "current_stage": "subflow.summarize",
+        "current_stage": "summarize_subflow_assignments",
         "subflow_summary": _subflow_summary(state["run_id"], processed),
         "kb_version": runtime.playbook.version,
     }
@@ -453,15 +527,15 @@ def subflow_summarize(state: MetaAgentState) -> dict[str, Any]:
 
 def build_subflow_graph():
     graph = StateGraph(MetaAgentState)
-    add_phase_node(graph, "query", subflow_query, agent="subflow", phase="query")
-    add_phase_node(graph, "process", subflow_process, agent="subflow", phase="process")
-    add_phase_node(graph, "persist", subflow_persist, agent="subflow", phase="persist")
-    add_phase_node(graph, "summarize", subflow_summarize, agent="subflow", phase="summarize")
-    graph.add_edge(START, "query")
-    graph.add_edge("query", "process")
-    graph.add_edge("process", "persist")
-    graph.add_edge("persist", "summarize")
-    graph.add_edge("summarize", END)
+    add_phase_node(graph, "select_unresolved_subflows", subflow_query, agent="subflow", phase="query")
+    add_phase_node(graph, "score_subflows", subflow_process, agent="subflow", phase="process")
+    add_phase_node(graph, "persist_subflow_labels", subflow_persist, agent="subflow", phase="persist")
+    add_phase_node(graph, "summarize_subflow_assignments", subflow_summarize, agent="subflow", phase="summarize")
+    graph.add_edge(START, "select_unresolved_subflows")
+    graph.add_edge("select_unresolved_subflows", "score_subflows")
+    graph.add_edge("score_subflows", "persist_subflow_labels")
+    graph.add_edge("persist_subflow_labels", "summarize_subflow_assignments")
+    graph.add_edge("summarize_subflow_assignments", END)
     return graph.compile(name="classify_subflows")
 
 
@@ -475,7 +549,7 @@ def _examples(task_ids: list[str]) -> list[dict[str, str]]:
 def intent_discovery_query(state: MetaAgentState) -> dict[str, Any]:
     ids = runtime.store.unresolved_intent_ids(state["run_id"])
     runtime.store.set_workset(state["run_id"], "intent_discovery", ids)
-    return {"current_stage": "intent_discovery.query"}
+    return {"current_stage": "select_unresolved_intents"}
 
 
 def intent_discovery_discover(state: MetaAgentState) -> dict[str, Any]:
@@ -483,7 +557,7 @@ def intent_discovery_discover(state: MetaAgentState) -> dict[str, Any]:
     clusters, topics = _run_topic_discovery(ids)
     runtime.store.set_staging(state["run_id"], "intent_discovery_clusters", clusters)
     return {
-        "current_stage": "intent_discovery.discover",
+        "current_stage": "discover_intent_topics",
         "discovered_topics": topics,
         "retrieved_guidance": _merge_retrieved_guidance(state, topics),
     }
@@ -528,7 +602,7 @@ def intent_discovery_validate(state: MetaAgentState) -> dict[str, Any]:
                 }
             )
     runtime.store.set_staging(state["run_id"], "intent_discovery", candidates)
-    return {"current_stage": "intent_discovery.validate"}
+    return {"current_stage": "validate_intent_topics"}
 
 
 def intent_discovery_persist_proposal(state: MetaAgentState) -> dict[str, Any]:
@@ -553,7 +627,7 @@ def intent_discovery_persist_proposal(state: MetaAgentState) -> dict[str, Any]:
             }
         )
     runtime.store.set_staging(state["run_id"], "intent_discovery_ids", pending_ids)
-    return {"current_stage": "intent_discovery.persist_proposal", "pending_proposal_ids": pending_ids}
+    return {"current_stage": "persist_intent_proposals", "pending_proposal_ids": pending_ids}
 
 
 def intent_discovery_hitl(state: MetaAgentState) -> dict[str, Any]:
@@ -563,7 +637,7 @@ def intent_discovery_hitl(state: MetaAgentState) -> dict[str, Any]:
             continue
         decision, note = simulate_hitl(proposal)
         runtime.store.decide_proposal(proposal["proposal_id"], decision, note)
-    return {"current_stage": "intent_discovery.hitl"}
+    return {"current_stage": "review_intent_proposals"}
 
 
 def intent_discovery_persist_kb(state: MetaAgentState) -> dict[str, Any]:
@@ -604,7 +678,7 @@ def intent_discovery_persist_kb(state: MetaAgentState) -> dict[str, Any]:
         runtime.store.set_run_kb_version(state["run_id"], version)
         approved.append(proposal["proposal_id"])
     return {
-        "current_stage": "intent_discovery.persist_kb",
+        "current_stage": "persist_accepted_intents",
         "kb_version": runtime.playbook.version,
         "approved_change_ids": approved,
     }
@@ -622,35 +696,47 @@ def intent_discovery_summarize(state: MetaAgentState) -> dict[str, Any]:
     }
     merged = dict(state.get("discovery_summary") or {})
     merged["intents"] = summary
-    return {"current_stage": "intent_discovery.summarize", "discovery_summary": merged}
+    return {"current_stage": "summarize_intent_discovery", "discovery_summary": merged}
 
 
 def build_intent_discovery_graph():
     graph = StateGraph(MetaAgentState)
-    add_phase_node(graph, "query", intent_discovery_query, agent="intent_discovery", phase="query")
-    add_phase_node(graph, "discover", intent_discovery_discover, agent="intent_discovery", phase="process")
-    add_phase_node(graph, "validate", intent_discovery_validate, agent="intent_discovery", phase="process")
     add_phase_node(
-        graph, "persist_proposal", intent_discovery_persist_proposal, agent="intent_discovery", phase="persist"
+        graph, "select_unresolved_intents", intent_discovery_query, agent="intent_discovery", phase="query"
     )
-    add_phase_node(graph, "hitl", intent_discovery_hitl, agent="intent_discovery", phase="process")
-    add_phase_node(graph, "persist_kb", intent_discovery_persist_kb, agent="intent_discovery", phase="persist")
-    add_phase_node(graph, "summarize", intent_discovery_summarize, agent="intent_discovery", phase="summarize")
-    graph.add_edge(START, "query")
-    graph.add_edge("query", "discover")
-    graph.add_edge("discover", "validate")
-    graph.add_edge("validate", "persist_proposal")
-    graph.add_edge("persist_proposal", "hitl")
-    graph.add_edge("hitl", "persist_kb")
-    graph.add_edge("persist_kb", "summarize")
-    graph.add_edge("summarize", END)
+    add_phase_node(
+        graph, "discover_intent_topics", intent_discovery_discover, agent="intent_discovery", phase="process"
+    )
+    add_phase_node(
+        graph, "validate_intent_topics", intent_discovery_validate, agent="intent_discovery", phase="process"
+    )
+    add_phase_node(
+        graph, "persist_intent_proposals", intent_discovery_persist_proposal, agent="intent_discovery", phase="persist"
+    )
+    add_phase_node(
+        graph, "review_intent_proposals", intent_discovery_hitl, agent="intent_discovery", phase="process"
+    )
+    add_phase_node(
+        graph, "persist_accepted_intents", intent_discovery_persist_kb, agent="intent_discovery", phase="persist"
+    )
+    add_phase_node(
+        graph, "summarize_intent_discovery", intent_discovery_summarize, agent="intent_discovery", phase="summarize"
+    )
+    graph.add_edge(START, "select_unresolved_intents")
+    graph.add_edge("select_unresolved_intents", "discover_intent_topics")
+    graph.add_edge("discover_intent_topics", "validate_intent_topics")
+    graph.add_edge("validate_intent_topics", "persist_intent_proposals")
+    graph.add_edge("persist_intent_proposals", "review_intent_proposals")
+    graph.add_edge("review_intent_proposals", "persist_accepted_intents")
+    graph.add_edge("persist_accepted_intents", "summarize_intent_discovery")
+    graph.add_edge("summarize_intent_discovery", END)
     return graph.compile(name="discover_intents")
 
 
 def subflow_discovery_query(state: MetaAgentState) -> dict[str, Any]:
     ids = runtime.store.unresolved_subflow_ids(state["run_id"])
     runtime.store.set_workset(state["run_id"], "subflow_discovery", ids)
-    return {"current_stage": "subflow_discovery.query"}
+    return {"current_stage": "select_unresolved_subflows"}
 
 
 def subflow_discovery_discover(state: MetaAgentState) -> dict[str, Any]:
@@ -667,7 +753,7 @@ def subflow_discovery_discover(state: MetaAgentState) -> dict[str, Any]:
         topics.extend(group_topics)
     runtime.store.set_staging(state["run_id"], "subflow_discovery_clusters", clusters)
     return {
-        "current_stage": "subflow_discovery.discover",
+        "current_stage": "discover_subflow_topics",
         "discovered_subflows": topics,
         "retrieved_guidance": _merge_retrieved_guidance(state, topics),
     }
@@ -714,7 +800,7 @@ def subflow_discovery_validate(state: MetaAgentState) -> dict[str, Any]:
             }
         )
     runtime.store.set_staging(state["run_id"], "subflow_discovery", candidates)
-    return {"current_stage": "subflow_discovery.validate"}
+    return {"current_stage": "validate_subflow_topics"}
 
 
 def subflow_discovery_persist_proposal(state: MetaAgentState) -> dict[str, Any]:
@@ -739,7 +825,7 @@ def subflow_discovery_persist_proposal(state: MetaAgentState) -> dict[str, Any]:
             }
         )
     runtime.store.set_staging(state["run_id"], "subflow_discovery_ids", pending_ids)
-    return {"current_stage": "subflow_discovery.persist_proposal", "pending_proposal_ids": pending_ids}
+    return {"current_stage": "persist_subflow_proposals", "pending_proposal_ids": pending_ids}
 
 
 def subflow_discovery_hitl(state: MetaAgentState) -> dict[str, Any]:
@@ -749,7 +835,7 @@ def subflow_discovery_hitl(state: MetaAgentState) -> dict[str, Any]:
             continue
         decision, note = simulate_hitl(proposal)
         runtime.store.decide_proposal(proposal["proposal_id"], decision, note)
-    return {"current_stage": "subflow_discovery.hitl"}
+    return {"current_stage": "review_subflow_proposals"}
 
 
 def subflow_discovery_persist_kb(state: MetaAgentState) -> dict[str, Any]:
@@ -793,7 +879,7 @@ def subflow_discovery_persist_kb(state: MetaAgentState) -> dict[str, Any]:
         runtime.store.set_run_kb_version(state["run_id"], version)
         approved.append(proposal["proposal_id"])
     return {
-        "current_stage": "subflow_discovery.persist_kb",
+        "current_stage": "persist_accepted_subflows",
         "kb_version": runtime.playbook.version,
         "approved_change_ids": approved,
     }
@@ -811,28 +897,44 @@ def subflow_discovery_summarize(state: MetaAgentState) -> dict[str, Any]:
     }
     merged = dict(state.get("discovery_summary") or {})
     merged["subflows"] = summary
-    return {"current_stage": "subflow_discovery.summarize", "discovery_summary": merged}
+    return {"current_stage": "summarize_subflow_discovery", "discovery_summary": merged}
 
 
 def build_subflow_discovery_graph():
     graph = StateGraph(MetaAgentState)
-    add_phase_node(graph, "query", subflow_discovery_query, agent="subflow_discovery", phase="query")
-    add_phase_node(graph, "discover", subflow_discovery_discover, agent="subflow_discovery", phase="process")
-    add_phase_node(graph, "validate", subflow_discovery_validate, agent="subflow_discovery", phase="process")
     add_phase_node(
-        graph, "persist_proposal", subflow_discovery_persist_proposal, agent="subflow_discovery", phase="persist"
+        graph, "select_unresolved_subflows", subflow_discovery_query, agent="subflow_discovery", phase="query"
     )
-    add_phase_node(graph, "hitl", subflow_discovery_hitl, agent="subflow_discovery", phase="process")
-    add_phase_node(graph, "persist_kb", subflow_discovery_persist_kb, agent="subflow_discovery", phase="persist")
-    add_phase_node(graph, "summarize", subflow_discovery_summarize, agent="subflow_discovery", phase="summarize")
-    graph.add_edge(START, "query")
-    graph.add_edge("query", "discover")
-    graph.add_edge("discover", "validate")
-    graph.add_edge("validate", "persist_proposal")
-    graph.add_edge("persist_proposal", "hitl")
-    graph.add_edge("hitl", "persist_kb")
-    graph.add_edge("persist_kb", "summarize")
-    graph.add_edge("summarize", END)
+    add_phase_node(
+        graph, "discover_subflow_topics", subflow_discovery_discover, agent="subflow_discovery", phase="process"
+    )
+    add_phase_node(
+        graph, "validate_subflow_topics", subflow_discovery_validate, agent="subflow_discovery", phase="process"
+    )
+    add_phase_node(
+        graph,
+        "persist_subflow_proposals",
+        subflow_discovery_persist_proposal,
+        agent="subflow_discovery",
+        phase="persist",
+    )
+    add_phase_node(
+        graph, "review_subflow_proposals", subflow_discovery_hitl, agent="subflow_discovery", phase="process"
+    )
+    add_phase_node(
+        graph, "persist_accepted_subflows", subflow_discovery_persist_kb, agent="subflow_discovery", phase="persist"
+    )
+    add_phase_node(
+        graph, "summarize_subflow_discovery", subflow_discovery_summarize, agent="subflow_discovery", phase="summarize"
+    )
+    graph.add_edge(START, "select_unresolved_subflows")
+    graph.add_edge("select_unresolved_subflows", "discover_subflow_topics")
+    graph.add_edge("discover_subflow_topics", "validate_subflow_topics")
+    graph.add_edge("validate_subflow_topics", "persist_subflow_proposals")
+    graph.add_edge("persist_subflow_proposals", "review_subflow_proposals")
+    graph.add_edge("review_subflow_proposals", "persist_accepted_subflows")
+    graph.add_edge("persist_accepted_subflows", "summarize_subflow_discovery")
+    graph.add_edge("summarize_subflow_discovery", END)
     return graph.compile(name="discover_subflows")
 
 
@@ -846,7 +948,7 @@ def pathway_query(state: MetaAgentState) -> dict[str, Any]:
                 ids = json.loads(proposal["supporting_task_ids"])
                 break
     runtime.store.set_workset(state["run_id"], f"pathway:{subflow_id}", ids)
-    return {"current_stage": "pathway.query"}
+    return {"current_stage": "select_pathway_tasks"}
 
 
 def pathway_analyze(state: MetaAgentState) -> dict[str, Any]:
@@ -865,7 +967,7 @@ def pathway_analyze(state: MetaAgentState) -> dict[str, Any]:
     runtime.store.set_staging(state["run_id"], f"pathway:{subflow_id}", payload)
     merged_paths = list(state.get("action_paths") or [])
     merged_paths.extend(action_paths_to_state(path_result))
-    return {"current_stage": "pathway.analyze", "action_paths": merged_paths}
+    return {"current_stage": "analyze_action_paths", "action_paths": merged_paths}
 
 
 def pathway_recommend(state: MetaAgentState) -> dict[str, Any]:
@@ -898,7 +1000,7 @@ def pathway_recommend(state: MetaAgentState) -> dict[str, Any]:
         }
     )
     runtime.store.set_staging(state["run_id"], f"pathway:{subflow_id}", payload)
-    return {"current_stage": "pathway.recommend"}
+    return {"current_stage": "draft_pathway"}
 
 
 def pathway_evaluate(state: MetaAgentState) -> dict[str, Any]:
@@ -915,7 +1017,7 @@ def pathway_evaluate(state: MetaAgentState) -> dict[str, Any]:
         "support": round(payload.get("support", 0.0), 3),
     }
     runtime.store.set_staging(state["run_id"], f"pathway:{subflow_id}", payload)
-    return {"current_stage": "pathway.evaluate"}
+    return {"current_stage": "evaluate_pathway"}
 
 
 def pathway_persist(state: MetaAgentState) -> dict[str, Any]:
@@ -942,7 +1044,7 @@ def pathway_persist(state: MetaAgentState) -> dict[str, Any]:
         runtime.store.log_kb_change(version, "attach_guideline", {"subflow": subflow_id})
         runtime.store.set_run_kb_version(state["run_id"], version)
     runtime.store.set_staging(state["run_id"], f"pathway:{subflow_id}:rec_id", rec_id)
-    return {"current_stage": "pathway.persist", "kb_version": runtime.playbook.version}
+    return {"current_stage": "persist_pathway", "kb_version": runtime.playbook.version}
 
 
 def pathway_summarize(state: MetaAgentState) -> dict[str, Any]:
@@ -961,7 +1063,7 @@ def pathway_summarize(state: MetaAgentState) -> dict[str, Any]:
     merged["items"] = items
     merged["recommended"] = sum(1 for i in items if i.get("supported"))
     return {
-        "current_stage": "pathway.summarize",
+        "current_stage": "summarize_pathway",
         "recommendation_summary": merged,
         "kb_version": runtime.playbook.version,
     }
@@ -969,19 +1071,19 @@ def pathway_summarize(state: MetaAgentState) -> dict[str, Any]:
 
 def build_pathway_graph():
     graph = StateGraph(MetaAgentState)
-    add_phase_node(graph, "query", pathway_query, agent="pathway", phase="query")
-    add_phase_node(graph, "analyze", pathway_analyze, agent="pathway", phase="process")
-    add_phase_node(graph, "recommend", pathway_recommend, agent="pathway", phase="process")
-    add_phase_node(graph, "evaluate", pathway_evaluate, agent="pathway", phase="process")
-    add_phase_node(graph, "persist", pathway_persist, agent="pathway", phase="persist")
-    add_phase_node(graph, "summarize", pathway_summarize, agent="pathway", phase="summarize")
-    graph.add_edge(START, "query")
-    graph.add_edge("query", "analyze")
-    graph.add_edge("analyze", "recommend")
-    graph.add_edge("recommend", "evaluate")
-    graph.add_edge("evaluate", "persist")
-    graph.add_edge("persist", "summarize")
-    graph.add_edge("summarize", END)
+    add_phase_node(graph, "select_pathway_tasks", pathway_query, agent="pathway", phase="query")
+    add_phase_node(graph, "analyze_action_paths", pathway_analyze, agent="pathway", phase="process")
+    add_phase_node(graph, "draft_pathway", pathway_recommend, agent="pathway", phase="process")
+    add_phase_node(graph, "evaluate_pathway", pathway_evaluate, agent="pathway", phase="process")
+    add_phase_node(graph, "persist_pathway", pathway_persist, agent="pathway", phase="persist")
+    add_phase_node(graph, "summarize_pathway", pathway_summarize, agent="pathway", phase="summarize")
+    graph.add_edge(START, "select_pathway_tasks")
+    graph.add_edge("select_pathway_tasks", "analyze_action_paths")
+    graph.add_edge("analyze_action_paths", "draft_pathway")
+    graph.add_edge("draft_pathway", "evaluate_pathway")
+    graph.add_edge("evaluate_pathway", "persist_pathway")
+    graph.add_edge("persist_pathway", "summarize_pathway")
+    graph.add_edge("summarize_pathway", END)
     return graph.compile(name="recommend_pathway")
 
 
@@ -1123,9 +1225,15 @@ def build_graph(use_compiled: bool = False):
 
 
 def invoke_week(run_id: str, cohort_query: dict[str, Any] | None = None, *, compiled=None) -> MetaAgentState:
-    graph = compiled or build_meta_graph(False)
-    return invoke_named(
-        graph,
-        empty_state(run_id=run_id, cohort_query=cohort_query or {}),
-        agent="meta",
+    """Thin test wrapper. The public entrypoint is `build_graph(...); agent.invoke(payload)`."""
+    graph = compiled or build_graph()
+    query = dict(cohort_query or {})
+    payload = empty_state(
+        run_id=run_id,
+        start=query.get("start") or "",
+        end=query.get("end") or "",
+        method=query.get("method") or runtime.method,
+        kb_version=runtime.playbook.version if runtime.playbook is not None else 1,
+        cohort_query=query,
     )
+    return graph.invoke(payload, config=run_config(payload, agent="meta"))

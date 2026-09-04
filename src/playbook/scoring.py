@@ -41,3 +41,26 @@ def action_sequence_score(observed: list[str], expected: list[str]) -> float:
     if not observed or not expected:
         return 0.0
     return lcs_len(observed, expected) / max(len(observed), len(expected))
+
+
+def greedy_jaccard_clusters(
+    ids: list[str],
+    texts: dict[str, str],
+    threshold: float = CLUSTER_THRESHOLD,
+) -> list[list[str]]:
+    """Greedy Jaccard clustering. Fast stand-in for BERTopic."""
+    remaining = list(ids)
+    clusters: list[list[str]] = []
+    while remaining:
+        seed = remaining.pop(0)
+        seed_text = texts.get(seed, "")
+        group = [seed]
+        kept: list[str] = []
+        for other in remaining:
+            if jaccard(seed_text, texts.get(other, "")) >= threshold:
+                group.append(other)
+            else:
+                kept.append(other)
+        remaining = kept
+        clusters.append(group)
+    return clusters

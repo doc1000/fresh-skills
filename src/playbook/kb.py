@@ -34,8 +34,10 @@ class PlaybookKB:
         self.kb = deepcopy(kb)
         self.guidelines = deepcopy(guidelines)
         self.version = version
-        self.flow_titles = dict(flow_titles or DEFAULT_FLOW_TITLES)
-        self.subflow_titles = dict(subflow_titles or DEFAULT_SUBFLOW_TITLES)
+        stored_flow_titles = ontology.get("flow_titles") if isinstance(ontology, dict) else None
+        stored_subflow_titles = ontology.get("subflow_titles") if isinstance(ontology, dict) else None
+        self.flow_titles = dict(flow_titles or stored_flow_titles or DEFAULT_FLOW_TITLES)
+        self.subflow_titles = dict(subflow_titles or stored_subflow_titles or DEFAULT_SUBFLOW_TITLES)
         self.title_to_flow_id = {title: flow_id for flow_id, title in self.flow_titles.items()}
 
     def intent_ids(self) -> list[str]:
@@ -47,6 +49,9 @@ class PlaybookKB:
     def flow_title(self, intent_id: str) -> str:
         return self.flow_titles.get(intent_id, intent_id.replace("_", " ").title())
 
+    def subflow_title(self, subflow_id: str) -> str:
+        return self.subflow_titles.get(subflow_id, subflow_id.replace("_", " ").title())
+
     def intent_doc(self, intent_id: str) -> str:
         title = self.flow_title(intent_id)
         body = self.guidelines.get(title, {})
@@ -55,6 +60,22 @@ class PlaybookKB:
         return " ".join(
             [title, intent_id, body.get("description", ""), *subflow_titles, *subflow_ids]
         )
+
+    def guideline_intent_text(self, intent_id: str) -> str:
+        title = self.flow_title(intent_id)
+        desc = (self.guidelines.get(title) or {}).get("description") or ""
+        return f"{title}. {desc}".strip()
+
+    def guideline_subflow_text(self, intent_id: str, subflow_id: str) -> str:
+        title = self.flow_title(intent_id)
+        sub_title = self.subflow_title(subflow_id)
+        node = ((self.guidelines.get(title) or {}).get("subflows") or {}).get(sub_title) or {}
+        instructions = " ".join(node.get("instructions") or [])
+        bits: list[str] = []
+        for action in node.get("actions") or []:
+            bits.append(action.get("text") or "")
+            bits.extend(action.get("subtext") or [])
+        return f"{title} / {sub_title}. {instructions} {' '.join(bits)}".strip()
 
     def add_intent(self, intent_id: str, title: str, description: str) -> int:
         if intent_id not in self.ontology["intents"]["flows"]:
@@ -92,7 +113,13 @@ def load_playbook(data_dir: Path | None = None) -> PlaybookKB:
     ontology = json.loads((root / "seed_ontology.json").read_text(encoding="utf-8"))
     kb = json.loads((root / "seed_kb.json").read_text(encoding="utf-8"))
     guidelines = json.loads((root / "seed_guidelines.json").read_text(encoding="utf-8"))
-    return PlaybookKB(ontology, kb, guidelines)
+    return PlaybookKB(
+        ontology,
+        kb,
+        guidelines,
+        flow_titles=ontology.get("flow_titles"),
+        subflow_titles=ontology.get("subflow_titles"),
+    )
 
 
 def load_conversations(data_dir: Path | None = None) -> list[dict[str, Any]]:

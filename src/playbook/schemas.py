@@ -33,6 +33,8 @@ class DiscoveredTopic(BaseModel):
     size: int
     descriptor: str
     representative_conversation_ids: list[str]
+    member_ids: list[str] = Field(default_factory=list)
+    cohesive_enough: bool = False
 
 
 class RetrievedKB(BaseModel):
