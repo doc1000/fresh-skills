@@ -44,7 +44,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from collections import Counter, defaultdict
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -64,7 +64,20 @@ os.chdir(ROOT)
 if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
+from playbook.actions import discover_action_paths
 from playbook.config import ABCD_JSON, GUIDELINES_JSON, KB_JSON
+from playbook.data import conversation_document, parse_raw_conversation
+from playbook.topics import (
+    EXTRA_STOP,
+    BertopicConfig,
+    apply_fit_rule,
+    centroid_matrix,
+    classify_against,
+    discover_intent_topics,
+    discover_subflow_topics,
+    embed_texts,
+    resolve_label,
+)
 
 # --- knobs (untuned) ---
 MIN_SIM = 0.60
@@ -174,22 +187,6 @@ def first_customer(item: dict) -> str:
     return ""
 
 
-def conversation_text(item: dict) -> str:
-    return "\n".join(
-        text for speaker, text in item["original"] if speaker in {"customer", "agent"} and text
-    )
-
-
-def action_names(item: dict) -> tuple[str, ...]:
-    names = []
-    for turn in item.get("delexed") or []:
-        if turn.get("speaker") == "action":
-            targets = turn.get("targets") or []
-            if len(targets) > 2 and targets[2]:
-                names.append(str(targets[2]))
-    return tuple(names)
-
-
 def pick(flow: str, subflow: str, n: int) -> list[dict]:
     items = [
         c
@@ -244,171 +241,60 @@ inventory.describe()
 # %% [markdown]
 # ## 2. Shared helpers
 #
-# `classify_against` scores embeddings against a named prototype matrix (centroids or guideline docs). `discover_topics` is the only clustering entry point.
+# Fitting/discovery lives in `playbook.topics` / `playbook.actions`. The notebook keeps
+# sampling, ABCD guideline-doc construction, display, and offline-label inspection.
+# `discover_intent_topics` / `discover_subflow_topics` are the clustering entry points.
 
 # %%
-from bertopic import BERTopic
-from hdbscan import HDBSCAN
-from sentence_transformers import SentenceTransformer
-from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS, CountVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-from umap import UMAP
+from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS
 
-EXTRA_STOP = {
-    "agent", "customer", "help", "thank", "thanks", "ok", "okay", "please",
-    "hi", "hello", "yes", "no", "today", "need", "want", "let", "one",
-    "moment", "great", "good", "day", "welcome", "acme", "acmebrands",
-    "id", "account", "order", "email", "username", "name", "full",
-}
 STOP = list(frozenset(ENGLISH_STOP_WORDS).union(EXTRA_STOP))
+TOPIC_CONFIG = BertopicConfig(
+    min_cluster_size=MIN_CLUSTER_SIZE,
+    min_to_cluster=MIN_TO_CLUSTER,
+    min_topic_n=MIN_TOPIC_N,
+    n_neighbors=12,
+    seed=42,
+)
+print("BERTopic config")
+display(TOPIC_CONFIG.model_dump())
+print("extra stopwords", sorted(EXTRA_STOP))
 
-embedder = SentenceTransformer("all-MiniLM-L6-v2")
 
-
-def embed_texts(texts: list[str]) -> np.ndarray:
-    return np.asarray(embedder.encode(texts, show_progress_bar=False))
+def as_records(items: list[dict]):
+    return [parse_raw_conversation(item) for item in items]
 
 
 def embed_items(items: list[dict]) -> np.ndarray:
-    return embed_texts([conversation_text(c) for c in items])
+    return embed_texts([conversation_document(parse_raw_conversation(c)) for c in items])
 
 
-def classify_against(
-    embs: np.ndarray,
-    proto: np.ndarray,
-    names: list[str],
-    *,
-    min_sim: float = MIN_SIM,
-    min_margin: float = MIN_MARGIN,
-) -> pd.DataFrame:
-    """Nearest prototype. `fits` = sim >= min_sim and margin >= min_margin."""
-    if proto.ndim != 2 or proto.shape[0] != len(names):
-        raise ValueError("proto rows must match names")
-    sims = cosine_similarity(embs, proto)
+def matches_frame(matches, prefix: str) -> pd.DataFrame:
+    return pd.DataFrame([match.model_dump() for match in matches]).add_prefix(prefix)
+
+
+def topic_frame(result, items: list[dict] | None = None) -> pd.DataFrame:
+    """Display helper. Offline majority/purity stay in the notebook."""
     rows = []
-    for row in sims:
-        order = np.argsort(row)[::-1]
-        best = int(order[0])
-        second = int(order[1]) if len(order) > 1 else best
-        sim = float(row[best])
-        margin = float(row[best] - row[second]) if len(names) > 1 else sim
+    by_id = {str(item["convo_id"]): item for item in (items or [])}
+    for topic in result.topics:
+        members = [by_id[member_id] for member_id in topic.member_ids if member_id in by_id]
+        mix = Counter(true_label(item) for item in members) if members else Counter()
+        majority, maj_n = mix.most_common(1)[0] if mix else ("", 0)
         rows.append(
             {
-                "pred": names[best],
-                "sim": round(sim, 3),
-                "margin": round(margin, 3),
-                "fits": bool(sim >= min_sim and margin >= min_margin),
-            }
-        )
-    return pd.DataFrame(rows)
-
-
-def apply_fit_rule(fits_centroid: pd.Series, fits_guideline: pd.Series, rule: str = FIT_RULE) -> pd.Series:
-    if rule == "centroid":
-        return fits_centroid
-    if rule == "guideline":
-        return fits_guideline
-    if rule == "both":
-        return fits_centroid & fits_guideline
-    if rule == "either":
-        return fits_centroid | fits_guideline
-    raise ValueError(f"unknown FIT_RULE {rule}")
-
-
-def fit_bertopic(
-    docs: list[str],
-    *,
-    min_cluster_size: int = MIN_CLUSTER_SIZE,
-    n_neighbors: int = 12,
-    seed: int = 42,
-) -> tuple[BERTopic, list[int]]:
-    n = len(docs)
-    model = BERTopic(
-        embedding_model=embedder,
-        umap_model=UMAP(
-            n_neighbors=max(2, min(n_neighbors, n - 2)),
-            n_components=min(5, max(2, n - 2)),
-            min_dist=0.0,
-            metric="cosine",
-            random_state=seed,
-        ),
-        hdbscan_model=HDBSCAN(
-            min_cluster_size=min_cluster_size,
-            min_samples=1,
-            metric="euclidean",
-            cluster_selection_method="eom",
-            prediction_data=True,
-        ),
-        vectorizer_model=CountVectorizer(stop_words=STOP, ngram_range=(1, 2), min_df=1),
-        calculate_probabilities=False,
-        verbose=False,
-    )
-    topics, _ = model.fit_transform(docs)
-    return model, list(topics)
-
-
-def topic_table(items: list[dict], topics: list[int], model: BERTopic) -> pd.DataFrame:
-    by_topic: dict[int, list[dict]] = defaultdict(list)
-    for item, topic_id in zip(items, topics):
-        by_topic[topic_id].append(item)
-    rows = []
-    for topic_id in sorted(by_topic):
-        members = by_topic[topic_id]
-        words = [w for w, _ in (model.get_topic(topic_id) or [])[:8]] if topic_id != -1 else []
-        mix = Counter(true_label(c) for c in members)
-        majority, maj_n = mix.most_common(1)[0]
-        n = len(members)
-        rows.append(
-            {
-                "topic": topic_id,
-                "n": n,
-                "descriptor": ", ".join(words),
-                "cohesive_enough": topic_id != -1 and n >= MIN_TOPIC_N,
+                "topic": topic.topic_id,
+                "n": topic.size,
+                "descriptor": topic.descriptor,
+                "cohesive_enough": topic.cohesive_enough,
+                "parent_intent": topic.parent_intent,
                 "offline_majority": majority,
-                "offline_purity": round(maj_n / n, 2),
-                "member_ids": [int(c["convo_id"]) for c in members],
+                "offline_purity": round(maj_n / topic.size, 2) if topic.size else None,
+                "member_ids": [int(member_id) for member_id in topic.member_ids],
+                "representative_ids": [int(member_id) for member_id in topic.representative_ids],
             }
         )
     return pd.DataFrame(rows)
-
-
-def discover_topics(
-    items: list[dict],
-    *,
-    min_cluster_size: int = MIN_CLUSTER_SIZE,
-    min_to_cluster: int = MIN_TO_CLUSTER,
-) -> tuple[pd.DataFrame, list[int], BERTopic | None]:
-    """BERTopic on `items`. Returns (topic table, per-item topic ids, model)."""
-    if len(items) < min_to_cluster:
-        print(f"skip clustering: n={len(items)} < min_to_cluster={min_to_cluster}")
-        return pd.DataFrame(), [-1] * len(items), None
-    model, topics = fit_bertopic(
-        [conversation_text(c) for c in items],
-        min_cluster_size=min(min_cluster_size, max(2, len(items))),
-    )
-    table = topic_table(items, topics, model)
-    return table, topics, model
-
-
-def resolve_label(
-    fits_c: bool,
-    pred_c: str,
-    sim_c: float,
-    fits_g: bool,
-    pred_g: str,
-    sim_g: float,
-) -> str | None:
-    """Assigned label used by the next stage. None = unmatched under FIT_RULE."""
-    assigned = apply_fit_rule(pd.Series([fits_c]), pd.Series([fits_g])).iloc[0]
-    if not assigned:
-        return None
-    if fits_c and fits_g:
-        return pred_c if sim_c >= sim_g else pred_g
-    if fits_c:
-        return pred_c
-    if fits_g:
-        return pred_g
-    return None
 
 
 def guideline_subflow_doc(flow: str, subflow: str) -> str:
@@ -428,17 +314,6 @@ def guideline_intent_doc(flow: str) -> str:
     desc = guidelines[title].get("description") or ""
     return f"{title}. {desc}"
 
-
-def centroid_matrix(items: list[dict], group_of, names: list[str]) -> np.ndarray:
-    embs = embed_items(items)
-    groups: dict[str, list[int]] = defaultdict(list)
-    for i, item in enumerate(items):
-        groups[group_of(item)].append(i)
-    missing = [name for name in names if not groups[name]]
-    if missing:
-        raise ValueError(f"no seed items for {missing}")
-    return np.vstack([embs[groups[name]].mean(axis=0) for name in names])
-
 # %% [markdown]
 # ## 3. Build intent prototypes from the seed only
 
@@ -447,7 +322,7 @@ week_emb = embed_items(week_items)
 seed_emb = embed_items(seed_items)
 
 intent_centroid = centroid_matrix(
-    seed_items, lambda c: c["scenario"]["flow"], INTENT_NAMES
+    seed_emb, [c["scenario"]["flow"] for c in seed_items], INTENT_NAMES
 )
 intent_guideline = embed_texts([guideline_intent_doc(flow) for flow in INTENT_NAMES])
 
@@ -461,7 +336,9 @@ subflow_guideline: dict[str, np.ndarray] = {}
 for flow, subflows in SEED_SUBFLOWS.items():
     seeded = [c for c in seed_items if c["scenario"]["flow"] == flow]
     subflow_centroid[flow] = centroid_matrix(
-        seeded, lambda c: c["scenario"]["subflow"], subflows
+        embed_items(seeded),
+        [c["scenario"]["subflow"] for c in seeded],
+        subflows,
     )
     subflow_guideline[flow] = embed_texts(
         [guideline_subflow_doc(flow, sf) for sf in subflows]
@@ -474,16 +351,23 @@ for flow, subflows in SEED_SUBFLOWS.items():
 # Two matchers, then `FIT_RULE` decides who is assigned vs leftover. Leftovers go to clustering.
 
 # %%
-intent_c = classify_against(week_emb, intent_centroid, INTENT_NAMES)
-intent_g = classify_against(week_emb, intent_guideline, INTENT_NAMES)
-intent_c = intent_c.add_prefix("intent_centroid_")
-intent_g = intent_g.add_prefix("intent_guideline_")
+intent_c = matches_frame(
+    classify_against(week_emb, intent_centroid, INTENT_NAMES, min_sim=MIN_SIM, min_margin=MIN_MARGIN),
+    "intent_centroid_",
+)
+intent_g = matches_frame(
+    classify_against(week_emb, intent_guideline, INTENT_NAMES, min_sim=MIN_SIM, min_margin=MIN_MARGIN),
+    "intent_guideline_",
+)
 
 intent_df = inventory.copy()
 intent_df = pd.concat([intent_df.reset_index(drop=True), intent_c, intent_g], axis=1)
-intent_df["intent_assigned"] = apply_fit_rule(
-    intent_df["intent_centroid_fits"], intent_df["intent_guideline_fits"]
-)
+intent_df["intent_assigned"] = [
+    apply_fit_rule(bool(centroid_fits), bool(guideline_fits), FIT_RULE)
+    for centroid_fits, guideline_fits in zip(
+        intent_df["intent_centroid_fits"], intent_df["intent_guideline_fits"]
+    )
+]
 intent_df["pred_intent"] = [
     resolve_label(
         bool(r.intent_centroid_fits),
@@ -492,6 +376,7 @@ intent_df["pred_intent"] = [
         bool(r.intent_guideline_fits),
         r.intent_guideline_pred,
         r.intent_guideline_sim,
+        FIT_RULE,
     )
     for r in intent_df.itertuples()
 ]
@@ -598,23 +483,26 @@ label_confusion(df=intent_df, pred_col="pred_intent", true_col="true_flow")
 # Clustering runs only on unmatched conversations.
 
 # %%
-intent_topics, intent_topic_ids, intent_topic_model = discover_topics(unmatched_items)
+intent_result = discover_intent_topics(as_records(unmatched_items), config=TOPIC_CONFIG)
+if intent_result.skipped:
+    print(f"skip clustering: n={len(unmatched_items)} < min_to_cluster={TOPIC_CONFIG.min_to_cluster}")
+intent_topics = topic_frame(intent_result, unmatched_items)
 display(intent_topics)
+print("assignments", intent_result.assignments)
 
 new_intent_clusters: list[dict] = []
-if not intent_topics.empty:
-    for row in intent_topics.itertuples():
-        if not row.cohesive_enough:
-            continue
-        members = [by_id[i] for i in row.member_ids]
-        new_intent_clusters.append(
-            {
-                "topic": int(row.topic),
-                "n": int(row.n),
-                "descriptor": row.descriptor,
-                "items": members,
-            }
-        )
+for topic in intent_result.topics:
+    if not topic.cohesive_enough:
+        continue
+    members = [by_id[int(member_id)] for member_id in topic.member_ids]
+    new_intent_clusters.append(
+        {
+            "topic": topic.topic_id,
+            "n": topic.size,
+            "descriptor": topic.descriptor,
+            "items": members,
+        }
+    )
 print("candidate new intents", [(c["topic"], c["n"], c["descriptor"]) for c in new_intent_clusters])
 
 # %% [markdown]
@@ -632,12 +520,21 @@ for flow, subflows in SEED_SUBFLOWS.items():
         continue
     items = [by_id[i] for i in part["conversation_id"]]
     embs = embed_items(items)
-    sf_c = classify_against(embs, subflow_centroid[flow], subflows).add_prefix("subflow_centroid_")
-    sf_g = classify_against(embs, subflow_guideline[flow], subflows).add_prefix("subflow_guideline_")
-    block = pd.concat([part.reset_index(drop=True), sf_c, sf_g], axis=1)
-    block["subflow_assigned"] = apply_fit_rule(
-        block["subflow_centroid_fits"], block["subflow_guideline_fits"]
+    sf_c = matches_frame(
+        classify_against(embs, subflow_centroid[flow], subflows, min_sim=MIN_SIM, min_margin=MIN_MARGIN),
+        "subflow_centroid_",
     )
+    sf_g = matches_frame(
+        classify_against(embs, subflow_guideline[flow], subflows, min_sim=MIN_SIM, min_margin=MIN_MARGIN),
+        "subflow_guideline_",
+    )
+    block = pd.concat([part.reset_index(drop=True), sf_c, sf_g], axis=1)
+    block["subflow_assigned"] = [
+        apply_fit_rule(bool(centroid_fits), bool(guideline_fits), FIT_RULE)
+        for centroid_fits, guideline_fits in zip(
+            block["subflow_centroid_fits"], block["subflow_guideline_fits"]
+        )
+    ]
     block["pred_subflow"] = [
         resolve_label(
             bool(r.subflow_centroid_fits),
@@ -646,6 +543,7 @@ for flow, subflows in SEED_SUBFLOWS.items():
             bool(r.subflow_guideline_fits),
             r.subflow_guideline_pred,
             r.subflow_guideline_sim,
+            FIT_RULE,
         )
         for r in block.itertuples()
     ]
@@ -689,7 +587,7 @@ label_summary(df=subflow_df, pred_col="pred_subflow", true_col="true_subflow")
 # %% [markdown]
 # ## 7. Discover candidate new subflows
 #
-# Same `discover_topics` on unclassified conversations **inside each known intent**.
+# Same `discover_subflow_topics` on unclassified conversations **inside each known intent**.
 
 # %%
 new_subflow_clusters: list[dict] = []
@@ -699,20 +597,22 @@ for flow in INTENT_NAMES:
     leftover = subflow_df[(subflow_df["pred_intent"] == flow) & (~subflow_df["subflow_assigned"])]
     leftover_items = [by_id[i] for i in leftover["conversation_id"]]
     print(f"\n--- unclassified under {flow}: n={len(leftover_items)} ---")
-    table, _, _ = discover_topics(leftover_items)
-    display(table)
-    if table.empty:
+    result = discover_subflow_topics(as_records(leftover_items), intent=flow, config=TOPIC_CONFIG)
+    if result.skipped:
+        print(f"skip clustering: n={len(leftover_items)} < min_to_cluster={TOPIC_CONFIG.min_to_cluster}")
         continue
-    for row in table.itertuples():
-        if not row.cohesive_enough:
+    table = topic_frame(result, leftover_items)
+    display(table)
+    for topic in result.topics:
+        if not topic.cohesive_enough:
             continue
         new_subflow_clusters.append(
             {
                 "intent": flow,
-                "topic": int(row.topic),
-                "n": int(row.n),
-                "descriptor": row.descriptor,
-                "member_ids": list(row.member_ids),
+                "topic": topic.topic_id,
+                "n": topic.size,
+                "descriptor": topic.descriptor,
+                "member_ids": [int(member_id) for member_id in topic.member_ids],
             }
         )
 print("candidate new subflows", new_subflow_clusters)
@@ -726,8 +626,15 @@ print("candidate new subflows", new_subflow_clusters)
 for cluster in new_intent_clusters:
     print(f"\n--- new intent topic {cluster['topic']} n={cluster['n']} ---")
     print("descriptor:", cluster["descriptor"])
-    table, _, _ = discover_topics(cluster["items"])
-    display(table)
+    result = discover_subflow_topics(
+        as_records(cluster["items"]),
+        intent=f"new:{cluster['topic']}",
+        config=TOPIC_CONFIG,
+    )
+    if result.skipped:
+        print(f"skip clustering: n={cluster['n']} < min_to_cluster={TOPIC_CONFIG.min_to_cluster}")
+        continue
+    display(topic_frame(result, cluster["items"]))
 
 # %% [markdown]
 # ## 9. Action sequences on discovered clusters
@@ -735,21 +642,20 @@ for cluster in new_intent_clusters:
 # Inspection only. Exact sequence identity is usually noisy; button sets are listed too.
 
 # %%
-def action_report(items: list[dict], title: str) -> None:
-    seqs = Counter(action_names(c) for c in items)
-    print(f"\n{title}  n={len(items)}  unique_seqs={len(seqs)}")
-    for seq, n in seqs.most_common(5):
-        print(f"  {n:3d}  {seq}")
-    buttons = Counter(name for c in items for name in set(action_names(c)))
-    print("  button presence", dict(buttons.most_common()))
+def show_action_paths(items: list[dict], title: str) -> None:
+    result = discover_action_paths(as_records(items))
+    print(f"\n{title}  n={result.n_conversations}  unique_seqs={result.n_unique_paths}")
+    for path in result.paths[:5]:
+        print(f"  {path.count:3d}  {tuple(path.actions)}")
+    print("  button presence", result.button_counts)
 
 
 for cluster in new_subflow_clusters:
     members = [by_id[i] for i in cluster["member_ids"]]
-    action_report(members, f"new subflow under {cluster['intent']} topic {cluster['topic']}")
+    show_action_paths(members, f"new subflow under {cluster['intent']} topic {cluster['topic']}")
 
 for cluster in new_intent_clusters:
-    action_report(cluster["items"], f"new intent topic {cluster['topic']}")
+    show_action_paths(cluster["items"], f"new intent topic {cluster['topic']}")
     print("  canonical kb for probe intent subflow (offline)", kb.get(PROBE_INTENT[1]))
 
 print("\ndone. change MIN_SIM / MIN_MARGIN / FIT_RULE / MIN_TOPIC_N and re-run.")

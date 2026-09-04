@@ -49,8 +49,9 @@ if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
 from playbook.config import ABCD_JSON, GUIDELINES_JSON, KB_JSON, ONTOLOGY_JSON
-from playbook.data import conversation_document, load_fixture_labels, load_week
+from playbook.data import conversation_document, load_fixture_labels, load_week, parse_raw_conversation
 from playbook.fixtures import DEMO_FLOW, ROLE_TO_SUBFLOW, WEEK_MEMBERSHIP
+from playbook.topics import EXTRA_STOP, BertopicConfig, discover_topics
 
 load_dotenv(ROOT / ".env")
 con = duckdb.connect(database=":memory:")
@@ -239,26 +240,6 @@ print("storewide_query actual subflows",
 # We do **not** require `topic_id == subflow`. Success = a human can read a topic descriptor + representatives and recognize a recurring operational pattern.
 
 # %%
-from bertopic import BERTopic
-from hdbscan import HDBSCAN
-from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS, CountVectorizer
-from umap import UMAP
-
-EXTRA_STOP = {
-    "agent", "customer", "help", "thank", "thanks", "ok", "okay", "please",
-    "hi", "hello", "yes", "no", "today", "need", "want", "let", "one",
-    "moment", "great", "good", "day", "welcome", "acme", "acmebrands",
-    "id", "account", "order", "email", "username", "name", "full",
-}
-STOP = list(frozenset(ENGLISH_STOP_WORDS).union(EXTRA_STOP))
-
-
-def conversation_text(item: dict) -> str:
-    return "\n".join(
-        text for speaker, text in item["original"] if speaker in {"customer", "agent"} and text
-    )
-
-
 def balanced_sample(flow: str, per_subflow: int) -> list[dict]:
     grouped: dict[str, list] = defaultdict(list)
     for item in all_convos:
@@ -271,54 +252,32 @@ def balanced_sample(flow: str, per_subflow: int) -> list[dict]:
     return picked
 
 
-def fit_bertopic(docs: list[str], *, min_cluster_size: int, n_neighbors: int, seed: int = 42):
-    n = len(docs)
-    umap_model = UMAP(
-        n_neighbors=max(2, min(n_neighbors, n - 2)),
-        n_components=min(5, max(2, n - 2)),
-        min_dist=0.0,
-        metric="cosine",
-        random_state=seed,
-    )
-    hdbscan_model = HDBSCAN(
-        min_cluster_size=min_cluster_size,
-        min_samples=1,
-        metric="euclidean",
-        cluster_selection_method="eom",
-        prediction_data=True,
-    )
-    model = BERTopic(
-        embedding_model="all-MiniLM-L6-v2",
-        umap_model=umap_model,
-        hdbscan_model=hdbscan_model,
-        vectorizer_model=CountVectorizer(stop_words=STOP, ngram_range=(1, 2), min_df=1),
-        calculate_probabilities=False,
-        verbose=False,
-    )
-    topics, _ = model.fit_transform(docs)
-    return model, topics
-
-
-def topic_crosstab(items: list[dict], topics: list[int], model: BERTopic) -> None:
+def topic_crosstab(items: list[dict], result) -> None:
     labels = [item["scenario"]["subflow"] for item in items]
-    print("topic sizes", Counter(topics).most_common())
+    print("topic sizes", Counter(result.assignments).most_common())
+    print("config", {k: result.config.model_dump()[k] for k in ("min_cluster_size", "n_neighbors", "seed", "embedding_model")})
     by_topic: dict[int, Counter] = defaultdict(Counter)
-    for topic_id, label in zip(topics, labels):
+    for topic_id, label in zip(result.assignments, labels):
         by_topic[topic_id][label] += 1
+    descriptors = {topic.topic_id: topic.descriptor for topic in result.topics}
     for topic_id in sorted(by_topic):
-        words = [w for w, _ in (model.get_topic(topic_id) or [])[:6]] if topic_id != -1 else []
+        words = [part.strip() for part in descriptors.get(topic_id, "").split(",") if part.strip()][:6]
         print(f"  topic {topic_id:3d} n={sum(by_topic[topic_id].values()):3d}  {words}  {by_topic[topic_id].most_common()}")
+
+
+print("extra stopwords", sorted(EXTRA_STOP))
 
 # %% [markdown]
 # ### 6a. `account_access` — cleaner clusters, cannot supply a fourth subflow
 
 # %%
 access = balanced_sample("account_access", 40)
-access_model, access_topics = fit_bertopic(
-    [conversation_text(item) for item in access], min_cluster_size=8, n_neighbors=12
+access_result = discover_topics(
+    [parse_raw_conversation(item) for item in access],
+    config=BertopicConfig(min_cluster_size=8, n_neighbors=12, min_to_cluster=2),
 )
 print("account_access n=120")
-topic_crosstab(access, access_topics, access_model)
+topic_crosstab(access, access_result)
 
 # %% [markdown]
 # Password / username / 2FA fall into mostly-pure topics. Usable, but Week 2 has no in-flow `D`.
@@ -328,11 +287,12 @@ topic_crosstab(access, access_topics, access_model)
 
 # %%
 defect = balanced_sample("product_defect", 30)
-defect_model, defect_topics = fit_bertopic(
-    [conversation_text(item) for item in defect], min_cluster_size=8, n_neighbors=12
+defect_result = discover_topics(
+    [parse_raw_conversation(item) for item in defect],
+    config=BertopicConfig(min_cluster_size=8, n_neighbors=12, min_to_cluster=2),
 )
 print("product_defect n=180")
-topic_crosstab(defect, defect_topics, defect_model)
+topic_crosstab(defect, defect_result)
 
 # %% [markdown]
 # The three return reasons merge. Refund initiate/update also mix. Not four demo-distinct workflows.
@@ -342,11 +302,12 @@ topic_crosstab(defect, defect_topics, defect_model)
 
 # %%
 shipping = balanced_sample("shipping_issue", 40)
-shipping_model, shipping_topics = fit_bertopic(
-    [conversation_text(item) for item in shipping], min_cluster_size=8, n_neighbors=12
+shipping_result = discover_topics(
+    [parse_raw_conversation(item) for item in shipping],
+    config=BertopicConfig(min_cluster_size=8, n_neighbors=12, min_to_cluster=2),
 )
 print("shipping_issue n=160")
-topic_crosstab(shipping, shipping_topics, shipping_model)
+topic_crosstab(shipping, shipping_result)
 
 # %% [markdown]
 # Typical pattern (exact topic IDs will jitter slightly with UMAP): a **cost/refund/cancel** topic, a **missing/waiting** topic, a **change-address** topic, and status split between “check shipment” and “confirm address”. That is good enough for a coverage-judgment demo. We will not chase purity.
@@ -357,23 +318,22 @@ topic_crosstab(shipping, shipping_topics, shipping_model)
 # A 13-conversation batch with `min_cluster_size=2` **fragmented**. ~18–20 conversations with `min_cluster_size=4` is the smallest setting that still produced recurring topics rather than pairs.
 
 # %%
-from playbook.data import parse_raw_conversation
-
 week1_raw = []
 for role, ids in WEEK_MEMBERSHIP["week_1"].items():
     week1_raw.extend(by_id[i] for i in ids)
-week1_docs = [conversation_document(parse_raw_conversation(item)) for item in week1_raw]
-week1_model, week1_topics = fit_bertopic(week1_docs, min_cluster_size=4, n_neighbors=6)
+week1_result = discover_topics(
+    [parse_raw_conversation(item) for item in week1_raw],
+    config=BertopicConfig(min_cluster_size=4, n_neighbors=6, min_to_cluster=2, min_topic_n=1),
+)
 print("pinned week_1 n=", len(week1_raw))
-topic_crosstab(week1_raw, week1_topics, week1_model)
+topic_crosstab(week1_raw, week1_result)
 print("\nrepresentatives / descriptors")
-for topic_id in sorted(set(week1_topics)):
-    if topic_id == -1:
+for topic in week1_result.topics:
+    if topic.topic_id == -1:
         continue
-    words = [w for w, _ in week1_model.get_topic(topic_id)[:8]]
-    members = [item for item, t in zip(week1_raw, week1_topics) if t == topic_id]
-    print(f"\ntopic {topic_id} {words}")
-    for item in members[:3]:
+    print(f"\ntopic {topic.topic_id} {topic.descriptor}")
+    for conversation_id in topic.representative_ids:
+        item = by_id[int(conversation_id)]
         print(f"  [{item['scenario']['subflow']}] {first_customer(item)[:120]}")
 
 # %% [markdown]
