@@ -164,8 +164,7 @@ def test_agent_flow_reaches_decision_and_review_states(runtime, stub_topic_fit):
     assert proposals
     assert all(row["review_decision"] in {"accept", "decline"} for row in proposals)
     assert any(row["candidate"] == "shipping_issue" and row["review_decision"] == "accept" for row in proposals)
-    assert any(row["candidate"] == "reset_2fa" and row["review_decision"] == "accept" for row in proposals)
-    assert any(row["proposal_type"] == "emerging" and row["review_decision"] == "decline" for row in proposals)
+    assert any(row["proposal_type"] == "emerging" and row["review_decision"] == "accept" for row in proposals)
 
     accepted_new_intent = {"proposal_type": "new_intent", "candidate": "shipping_issue"}
     assert simulate_hitl(accepted_new_intent)[0] == "accept"
@@ -174,10 +173,14 @@ def test_agent_flow_reaches_decision_and_review_states(runtime, stub_topic_fit):
     assert simulate_hitl({"proposal_type": "outlier", "candidate": None})[0] == "decline"
 
     assert "shipping_issue" in rt.playbook.intent_ids()
-    assert "reset_2fa" in rt.playbook.subflows_for("account_access")
-    assert "missing" in rt.playbook.subflows_for("shipping_issue")
-    assert result["recommendation_summary"].get("recommended", 0) >= 1
-    assert rt.store.list_recommendations("week-2026-09-01")
+    assert "recover_username" in rt.playbook.subflows_for("account_access")
+    emerging = [
+        row
+        for row in proposals
+        if row["proposal_type"] == "emerging" and row["review_decision"] == "accept"
+    ]
+    assert emerging
+    assert emerging[0]["candidate"] in rt.playbook.subflows_for(emerging[0]["parent_intent"])
 
 
 def test_notebook_imports_implementation_instead_of_duplicating_it():

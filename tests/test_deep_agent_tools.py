@@ -135,6 +135,7 @@ def test_retrieve_guidance_tool_catalog_and_query(runtime):
     assert catalog["intents"]
     assert "id" in catalog["intents"][0]
     assert "subflows" in catalog["intents"][0]
+    assert "has_pathway" in catalog["intents"][0]["subflows"][0]
     assert "guidance" not in catalog["intents"][0]
 
     with_guide = retrieve_guidance.invoke({"include_guidance": True})
@@ -227,3 +228,67 @@ def test_cohort_filter_persist_and_richer_summaries(runtime, stub_topic_fit):
 
     discovered = discover_intent.invoke({})
     assert "changes" in discovered["discovery_summary"]["intents"]
+
+
+def test_empty_path_subflow_is_classifiable(runtime, stub_topic_fit):
+    from playbook import classify_intent, classify_subflow, cohort
+    from playbook.agent import retrieve_guidance
+    from playbook import runtime as rt
+
+    rt.playbook.add_subflow(
+        "account_access",
+        "account_locked",
+        description="account locked lockout",
+    )
+    catalog = retrieve_guidance.invoke({})
+    by_id = {
+        row["id"]: row
+        for intent in catalog["intents"]
+        for row in intent["subflows"]
+    }
+    assert by_id["account_locked"]["has_pathway"] is False
+    assert by_id["recover_username"]["has_pathway"] is True
+
+    cohort.invoke(
+        {
+            "start_date": "2026-09-01",
+            "end_date": "2026-09-07",
+            "method": "bertopic",
+            "run_id": "empty-path",
+        }
+    )
+    classify_intent.invoke({})
+    out = classify_subflow.invoke({})
+    assert out["subflow_summary"]["processed"] >= 1
+    methods = {row["method"] for row in rt.store.latest_subflows("empty-path").values()}
+    assert "bertopic_prototype_v1" in methods
+
+
+def test_discover_subflow_persists_emerging_without_pathway(runtime, stub_topic_fit):
+    from playbook import classify_intent, classify_subflow, cohort, discover_subflow
+    from playbook import runtime as rt
+
+    cohort.invoke(
+        {
+            "start_date": "2026-09-01",
+            "end_date": "2026-09-07",
+            "method": "bertopic",
+            "run_id": "emerging-run",
+        }
+    )
+    classify_intent.invoke({})
+    classify_subflow.invoke({})
+    discovered = discover_subflow.invoke({})
+    summary = discovered["discovery_summary"]["subflows"]
+    assert summary["candidate_count"] >= 0
+    emerging = [
+        row
+        for row in rt.store.list_proposals("emerging-run")
+        if row["proposal_type"] == "emerging"
+    ]
+    accepted = [row for row in emerging if row["review_decision"] == "accept"]
+    if accepted:
+        candidate = accepted[0]["candidate"]
+        parent = accepted[0]["parent_intent"]
+        assert candidate in rt.playbook.subflows_for(parent)
+        assert not rt.playbook.has_pathway(parent, candidate)

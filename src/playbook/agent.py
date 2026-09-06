@@ -30,25 +30,25 @@ from playbook.kb import retrieve_guidance as rank_guidance
 
 SYSTEM_PROMPT = """You manage the knowledge used by a customer-support agent to identify customer intents, subflows, and successful response pathways.
 
-The task store contains customer-support interactions with timestamps, intent labels, subflow labels, and other task metadata. The knowledge base contains the currently recognized intents, subflows, and pathway guidelines.
+The task store contains customer-support interactions with timestamps, intent labels, subflow labels, and other task metadata. The knowledge base contains the currently recognized intents, subflows, and pathway guidelines. A subflow is an issue type under a parent intent. It may exist before any successful response pathway is attached.
 
 Your job is to maintain and improve this knowledge using the available tools. Do not assume a fixed workflow. Select and reuse tools based on the user's request and the evidence you find.
 
-Use `retrieve_guidance` to inspect the live knowledge base. An empty query returns the current intent and subflow catalog. Pass a query to rank existing intents. Set include_guidance to read guideline text. This is the live playbook, not seed data.
+Use `retrieve_guidance` to inspect the live knowledge base. An empty query returns the current intent and subflow catalog. Each subflow includes has_pathway. Pass a query to rank existing intents. Set include_guidance to read guideline text. This is the live playbook, not seed data.
 
 Use `cohort` to retrieve the tasks needed for an analysis. Cohorts may be selected by date, intent, subflow, labeling status, or other supported criteria. A persist call (filters only, no sample_n or task_ids) replaces the working set used by later tools and returns a run_id. A filtered persist is the new working set — classify and discover will only see that slice, not the previous broader cohort. sample_n or task_ids is a peek: it does not replace the working set and does not return a run_id. Broaden or refine the persisted cohort when the available evidence is insufficient.
 
 Use `classify_intent` when tasks lack an intent and there is reason to believe they can be assigned to an existing intent.
 
-Use `classify_subflow` when tasks have an intent but lack a subflow and there is reason to believe they fit an existing subflow.
+Use `classify_subflow` when tasks have an intent but lack a subflow and there is reason to believe they fit an existing subflow. Classification matches the customer's issue, not the actions the agent took.
 
 Review classification results for semantic consistency with both the tasks and the existing knowledge base.
 
 Use `discover_intent` when tasks do not appear to match the existing intent taxonomy. Treat discovery as evidence for a possible new intent, not automatic proof that one should be created. Ensure proposed names are clear, distinct, and consistent with existing naming conventions.
 
-Use `discover_subflow` when enough related tasks exist within an intent to investigate whether a meaningful new subflow is present. Retrieve additional relevant tasks when necessary to establish sufficient evidence.
+Use `discover_subflow` when enough related tasks exist within an intent to investigate whether a meaningful new issue type is present. A discovered subflow does not need a pathway. Retrieve additional relevant tasks when necessary to establish sufficient evidence.
 
-When a new or changed subflow appears warranted, use `recommend_pathway` to identify successful response patterns that could improve the knowledge base. Prefer concise, actionable guidance grounded in successful task traces.
+Use `recommend_pathway` only for a known subflow that already has labeled successful tasks and has_pathway=false. Prefer concise, actionable guidance grounded in successful task traces. Do not treat pathway draft as part of classify or discover.
 
 Knowledge-base changes require the approval and persistence behavior implemented by the relevant tools. Never bypass those controls.
 
@@ -155,7 +155,7 @@ def retrieve_guidance(
 def cohort(
     start_date: str = "",
     end_date: str = "",
-    method: str = "jaccard",
+    method: str = "bertopic",
     cohort_query: dict[str, Any] | None = None,
     run_id: str = "",
     sample_n: int = 0,
@@ -241,8 +241,8 @@ def classify_intent(run_id: str = "") -> dict:
 def classify_subflow(run_id: str = "") -> dict:
     """Assign existing subflows to tasks that already have an intent.
 
-    Use this when tasks have an intent but lack a subflow and there is
-    reason to believe they fit an existing subflow."""
+    Matches the customer's issue to an issue type under that intent.
+    Subflows without a pathway are valid targets."""
     _require_runtime()
     rid = _run_id(run_id)
     result = invoke_named(build_subflow_graph(), empty_state(run_id=rid), agent="subflow")
@@ -272,9 +272,10 @@ def discover_intent(run_id: str = "") -> dict:
 
 @tool
 def discover_subflow(run_id: str = "") -> dict:
-    """Look for a possible new subflow among unresolved tasks in an intent.
+    """Look for a possible new issue type among unresolved tasks in an intent.
 
-    Retrieve additional relevant tasks when the current evidence is thin."""
+    A new subflow can be added without a pathway. Retrieve additional
+    relevant tasks when the current evidence is thin."""
     _require_runtime()
     rid = _run_id(run_id)
     result = invoke_named(

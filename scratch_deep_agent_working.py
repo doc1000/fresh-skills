@@ -33,11 +33,19 @@
 # ```
 
 # %%
+hf auth whoami
+
+# %%
+from sentence_transformers import SentenceTransformer
+SentenceTransformer("all-MiniLM-L6-v2")
+
+# %%
 from __future__ import annotations
 
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+from pprint import pprint
 
 print(load_dotenv(".env", override=True))
 key = os.getenv("OPENAI_API_KEY")
@@ -77,9 +85,6 @@ print("tasks", len(store.fetchall("SELECT task_id FROM tasks")))
 print("intents", playbook.intent_ids())
 print("LANGSMITH_TRACING", os.environ.get("LANGSMITH_TRACING"))
 
-# %%
-from pprint import pprint
-
 # %% [markdown]
 # ## Direct tool calls
 #
@@ -91,7 +96,7 @@ cohort_out = cohort.invoke(
     {
         "start_date": "2026-09-01",
         "end_date": "2026-09-07",
-        "method": "jaccard",
+        "method": "bert",
         "cohort_query": {},
         "run_id": "notebook-deep-agent",
     }

@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import operator
 import uuid
-from collections import Counter
 from typing import Annotated, Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -68,18 +67,6 @@ class MetaAgentState(TypedDict, total=False):
 SUMMARY_ID_CAP = 20
 SAMPLE_N_MAX = 5
 TASK_IDS_MAX = 2
-
-ACTION_FINGERPRINTS = {
-    ("pull-up-account", "enter-details", "send-link"): "reset_2fa",
-    (
-        "pull-up-account",
-        "validate-purchase",
-        "record-reason",
-        "update-order",
-        "make-purchase",
-    ): "missing",
-}
-
 
 def empty_state(**kwargs: Any) -> MetaAgentState:
     version = runtime.playbook.version if runtime.playbook is not None else 1
@@ -187,7 +174,7 @@ def render_mermaid(compiled, *, xray: bool | int = False) -> str:
 
 def simulate_hitl(proposal: dict[str, Any]) -> tuple[str, str]:
     ptype = proposal.get("proposal_type")
-    if ptype in {"outlier", "emerging"}:
+    if ptype == "outlier":
         return "decline", "Stub HITL: monitor / no playbook change."
     candidate = proposal.get("candidate") or "proposal"
     return "accept", f"Stub HITL: accept {candidate}."
@@ -200,14 +187,26 @@ def propose_intent_label(task_ids: list[str]) -> str:
     return "new_intent"
 
 
-def propose_subflow_label(task_ids: list[str], fallback: str) -> tuple[str, list[str]]:
-    successful = [t for t in runtime.store.get_tasks(task_ids) if t["success"]]
-    if not successful:
-        return fallback, []
-    sequences = [tuple(t["actions"]) for t in successful]
-    actions = list(Counter(sequences).most_common(1)[0][0])
-    label = ACTION_FINGERPRINTS.get(tuple(actions), "_".join(actions[-2:]) if actions else fallback)
-    return label, actions
+def _slug_label(text: str, fallback: str) -> str:
+    parts: list[str] = []
+    for raw in text.replace(",", " ").replace("-", " ").split():
+        token = "".join(ch for ch in raw.lower() if ch.isalnum())
+        if len(token) > 2:
+            parts.append(token)
+        if len(parts) == 4:
+            break
+    return "_".join(parts) if parts else fallback
+
+
+def propose_subflow_label(
+    task_ids: list[str],
+    fallback: str,
+    descriptor: str = "",
+) -> tuple[str, list[str]]:
+    source = descriptor.strip()
+    if not source:
+        source = " ".join(t["text"] for t in runtime.store.get_tasks(task_ids)[:3])
+    return _slug_label(source, fallback), []
 
 
 def mean_pairwise_jaccard(task_ids: list[str]) -> float:
@@ -570,7 +569,7 @@ def classify_subflows_process(task_ids: list[str], run_id: str) -> list[dict[str
     results = []
     for tid in task_ids:
         intent_id = latest_intents[tid]["intent_id"]
-        candidates = [sid for sid in runtime.playbook.subflows_for(intent_id) if sid in runtime.playbook.kb]
+        candidates = list(runtime.playbook.subflows_for(intent_id))
         if not candidates:
             results.append(
                 {
@@ -583,7 +582,12 @@ def classify_subflows_process(task_ids: list[str], run_id: str) -> list[dict[str
             )
             continue
         scored = [
-            (sid, score_subflow_similarity.invoke({"conversation_id": tid, "subflow_id": sid}))
+            (
+                sid,
+                score_subflow_similarity.invoke(
+                    {"conversation_id": tid, "subflow_id": sid, "intent_id": intent_id}
+                ),
+            )
             for sid in candidates
         ]
         scored.sort(key=lambda item: item[1], reverse=True)
@@ -621,7 +625,7 @@ def subflow_persist(state: MetaAgentState) -> dict[str, Any]:
             "intent_id": row["intent_id"],
             "subflow_id": row["subflow_id"],
             "confidence": row["confidence"],
-            "method": "bertopic_prototype_v1" if runtime.method == "bertopic" else "lcs_kb_actions_v1",
+            "method": "bertopic_prototype_v1" if runtime.method == "bertopic" else "jaccard_subflow_doc_v1",
             "kb_version": runtime.playbook.version,
             "created_at": now_iso(),
         }
@@ -907,23 +911,15 @@ def subflow_discovery_validate(state: MetaAgentState) -> dict[str, Any]:
         intent_id = cluster["intent_id"]
         mean = mean_pairwise_jaccard(task_ids)
         coherent = bool(cluster.get("cohesive_enough"))
+        topic = cluster.get("discovered_topic") or {}
+        descriptor = topic.get("descriptor") or ""
         successful = [t for t in runtime.store.get_tasks(task_ids) if t["success"]]
         if not coherent:
             ptype = "outlier"
             label, actions = None, []
-        elif len(successful) < MIN_SUCCESS_FOR_PATTERN:
-            ptype = "emerging"
-            label, actions = None, []
         else:
-            path_result = discover_action_paths(tasks_to_conversations(successful))
-            best = path_result.paths[0] if path_result.paths else None
-            support = (best.count / path_result.n_conversations) if best and path_result.n_conversations else 0.0
-            if best and best.actions and support >= PATTERN_SUPPORT:
-                ptype = "new_subflow"
-                label, actions = propose_subflow_label(task_ids, "new_subflow")
-            else:
-                ptype = "emerging"
-                label, actions = None, []
+            ptype = "emerging"
+            label, actions = propose_subflow_label(task_ids, "new_subflow", descriptor)
         candidates.append(
             {
                 "proposal_type": ptype,
@@ -935,6 +931,7 @@ def subflow_discovery_validate(state: MetaAgentState) -> dict[str, Any]:
                     "mean_jaccard": round(mean, 3),
                     "successful": len(successful),
                     "actions": actions,
+                    "descriptor": descriptor,
                     "coherent": coherent,
                     "source": "discover_subflow_topics",
                 },
@@ -982,14 +979,19 @@ def subflow_discovery_hitl(state: MetaAgentState) -> dict[str, Any]:
 def subflow_discovery_persist_kb(state: MetaAgentState) -> dict[str, Any]:
     approved = list(state.get("approved_change_ids") or [])
     ids = set(runtime.store.get_staging(state["run_id"], "subflow_discovery_ids") or [])
-    for proposal in runtime.store.list_proposals(state["run_id"], "new_subflow"):
+    for proposal in runtime.store.list_proposals(state["run_id"]):
         if proposal["proposal_id"] not in ids or proposal["review_decision"] != "accept":
+            continue
+        if proposal["proposal_type"] not in {"new_subflow", "emerging"}:
+            continue
+        if not proposal.get("candidate"):
             continue
         metrics = json.loads(proposal["metrics"])
         version = runtime.playbook.add_subflow(
             proposal["parent_intent"],
             proposal["candidate"],
-            metrics.get("actions") or [],
+            actions=metrics.get("actions") or None,
+            description=metrics.get("descriptor") or "",
         )
         evidence_ids = json.loads(proposal["supporting_task_ids"])
         runtime.store.persist_subflow_labels(
@@ -1031,7 +1033,7 @@ def subflow_discovery_summarize(state: MetaAgentState) -> dict[str, Any]:
     rows = [p for p in runtime.store.list_proposals(state["run_id"]) if p["proposal_id"] in ids]
     summary = {
         "unresolved_tasks": len(runtime.store.get_workset(state["run_id"], "subflow_discovery")),
-        "candidate_count": sum(1 for p in rows if p["proposal_type"] == "new_subflow"),
+        "candidate_count": sum(1 for p in rows if p["proposal_type"] in {"new_subflow", "emerging"}),
         "emerging_count": sum(1 for p in rows if p["proposal_type"] == "emerging"),
         "approved_count": sum(1 for p in rows if p["review_decision"] == "accept"),
         "rejected_count": sum(1 for p in rows if p["review_decision"] == "decline"),

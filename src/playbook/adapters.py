@@ -175,8 +175,10 @@ def _prototype_rows(
     fit_rule: FitRule,
 ) -> list[dict[str, Any]]:
     records = list(conversations)
+    if not records or not names:
+        return []
     documents = [conversation_document(record) for record in records]
-    embeddings = embed_texts(documents) if documents else np.zeros((0, 1))
+    embeddings = embed_texts(documents)
 
     centroid_names = list(names)
     seed_docs: list[str] = []
@@ -193,16 +195,18 @@ def _prototype_rows(
 
     centroid_matches = None
     if seed_docs:
-        prototypes = centroid_matrix(embed_texts(seed_docs), seed_labels, centroid_names)
-        centroid_matches = classify_against(
-            embeddings, prototypes, centroid_names, min_sim=min_sim, min_margin=min_margin
-        )
+        seeded_names = [name for name in centroid_names if name in set(seed_labels)]
+        if seeded_names:
+            prototypes = centroid_matrix(embed_texts(seed_docs), seed_labels, seeded_names)
+            centroid_matches = classify_against(
+                embeddings, prototypes, seeded_names, min_sim=min_sim, min_margin=min_margin
+            )
 
     if kind == "intent":
         guide_docs = [playbook.guideline_intent_text(name) for name in centroid_names]
     else:
         intent_id = parent_intent or ""
-        guide_docs = [playbook.guideline_subflow_text(intent_id, name) for name in centroid_names]
+        guide_docs = [playbook.subflow_doc(intent_id, name) for name in centroid_names]
     guideline_matches = classify_against(
         embeddings,
         embed_texts(guide_docs),
@@ -304,7 +308,7 @@ def classify_subflows_bertopic(
         grouped.setdefault(intent_by_task[record.conversation_id], []).append(record)
     results: list[dict[str, Any]] = []
     for intent_id, group in grouped.items():
-        names = [sid for sid in playbook.subflows_for(intent_id) if sid in playbook.kb]
+        names = list(playbook.subflows_for(intent_id))
         if not names:
             for record in group:
                 results.append(

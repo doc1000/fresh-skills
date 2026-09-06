@@ -62,15 +62,13 @@ def _invoke_demo_week():
 
 
 def test_ds_discovery_is_invoked_from_the_real_agent_path(bertopic_runtime, stub_topic_fit, monkeypatch):
-    from playbook import actions, topics
+    from playbook import topics
 
     intent_calls: list[list[ConversationRecord]] = []
     subflow_calls: list[list[ConversationRecord]] = []
-    action_calls: list[list[ConversationRecord]] = []
 
     real_intent = topics.discover_intent_topics
     real_subflow = topics.discover_subflow_topics
-    real_actions = actions.discover_action_paths
 
     def spy_intent(conversations, **kwargs):
         intent_calls.append(list(conversations))
@@ -80,19 +78,13 @@ def test_ds_discovery_is_invoked_from_the_real_agent_path(bertopic_runtime, stub
         subflow_calls.append(list(conversations))
         return real_subflow(conversations, **kwargs)
 
-    def spy_actions(conversations, **kwargs):
-        action_calls.append(list(conversations))
-        return real_actions(conversations, **kwargs)
-
     monkeypatch.setattr("playbook.graph.discover_intent_topics", spy_intent)
     monkeypatch.setattr("playbook.graph.discover_subflow_topics", spy_subflow)
-    monkeypatch.setattr("playbook.graph.discover_action_paths", spy_actions)
 
     _invoke_demo_week()
 
     assert intent_calls, "discover_intent_topics was not called from invoke_week"
     assert subflow_calls, "discover_subflow_topics was not called from invoke_week"
-    assert action_calls, "discover_action_paths was not called from invoke_week"
 
 
 def test_discovery_outputs_enter_stable_typed_graph_state(bertopic_runtime, stub_topic_fit):
@@ -175,15 +167,16 @@ def test_existing_decision_and_hitl_flow_still_works(runtime, stub_topic_fit):
     assert proposals
     assert all(row["review_decision"] in {"accept", "decline"} for row in proposals)
     assert any(row["candidate"] == "shipping_issue" and row["review_decision"] == "accept" for row in proposals)
-    assert any(row["candidate"] == "reset_2fa" and row["review_decision"] == "accept" for row in proposals)
-    assert any(row["proposal_type"] == "emerging" and row["review_decision"] == "decline" for row in proposals)
+    assert any(row["proposal_type"] == "emerging" and row["review_decision"] == "accept" for row in proposals)
     assert simulate_hitl({"proposal_type": "new_intent", "candidate": "shipping_issue"})[0] == "accept"
     assert simulate_hitl({"proposal_type": "new_intent", "candidate": "new_intent"})[0] == "accept"
+    assert simulate_hitl({"proposal_type": "emerging", "candidate": "account_locked"})[0] == "accept"
     assert "shipping_issue" in rt.playbook.intent_ids()
-    assert "reset_2fa" in rt.playbook.subflows_for("account_access")
-    assert "missing" in rt.playbook.subflows_for("shipping_issue")
-    assert result["recommendation_summary"].get("recommended", 0) >= 1
-    assert rt.store.list_recommendations("week-2026-09-01")
+    assert "recover_username" in rt.playbook.subflows_for("account_access")
+    emerging = [row for row in proposals if row["proposal_type"] == "emerging" and row["review_decision"] == "accept"]
+    assert emerging
+    assert emerging[0]["candidate"] in rt.playbook.subflows_for(emerging[0]["parent_intent"])
+    assert not rt.playbook.has_pathway(emerging[0]["parent_intent"], emerging[0]["candidate"])
 
 
 def test_runtime_discovery_does_not_receive_held_out_abcd_labels(bertopic_runtime, stub_topic_fit, monkeypatch):

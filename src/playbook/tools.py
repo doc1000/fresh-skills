@@ -7,7 +7,7 @@ from typing import Any
 from langchain_core.tools import tool
 
 from playbook import runtime
-from playbook.scoring import action_sequence_score, jaccard
+from playbook.scoring import jaccard
 
 
 @tool
@@ -18,10 +18,16 @@ def score_intent_similarity(conversation_id: str, intent_id: str) -> float:
 
 
 @tool
-def score_subflow_similarity(conversation_id: str, subflow_id: str) -> float:
-    """Stub subflow match: action-sequence LCS vs kb.json buttons."""
+def score_subflow_similarity(conversation_id: str, subflow_id: str, intent_id: str = "") -> float:
+    """Stub semantic similarity of a conversation against an existing subflow."""
     task = runtime.store.get_tasks([conversation_id])[0]
-    return round(action_sequence_score(task["actions"], runtime.playbook.kb.get(subflow_id, [])), 3)
+    parent = intent_id
+    if not parent:
+        for flow_id in runtime.playbook.intent_ids():
+            if subflow_id in runtime.playbook.subflows_for(flow_id):
+                parent = flow_id
+                break
+    return round(jaccard(task["text"], runtime.playbook.subflow_doc(parent, subflow_id)), 3)
 
 
 @tool

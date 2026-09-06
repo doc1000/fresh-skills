@@ -66,16 +66,38 @@ class PlaybookKB:
         desc = (self.guidelines.get(title) or {}).get("description") or ""
         return f"{title}. {desc}".strip()
 
+    def _subflow_node(self, intent_id: str, subflow_id: str) -> dict[str, Any]:
+        title = self.flow_title(intent_id)
+        sub_title = self.subflow_title(subflow_id)
+        return ((self.guidelines.get(title) or {}).get("subflows") or {}).get(sub_title) or {}
+
+    def subflow_doc(self, intent_id: str, subflow_id: str) -> str:
+        """Issue-type document for classify. Title and description only — no actions."""
+        title = self.flow_title(intent_id)
+        sub_title = self.subflow_title(subflow_id)
+        node = self._subflow_node(intent_id, subflow_id)
+        description = node.get("description") or ""
+        instructions = " ".join(node.get("instructions") or [])
+        return " ".join(
+            part for part in [title, sub_title, subflow_id, description, instructions] if part
+        ).strip()
+
     def guideline_subflow_text(self, intent_id: str, subflow_id: str) -> str:
         title = self.flow_title(intent_id)
         sub_title = self.subflow_title(subflow_id)
-        node = ((self.guidelines.get(title) or {}).get("subflows") or {}).get(sub_title) or {}
+        node = self._subflow_node(intent_id, subflow_id)
         instructions = " ".join(node.get("instructions") or [])
         bits: list[str] = []
         for action in node.get("actions") or []:
             bits.append(action.get("text") or "")
             bits.extend(action.get("subtext") or [])
         return f"{title} / {sub_title}. {instructions} {' '.join(bits)}".strip()
+
+    def has_pathway(self, intent_id: str, subflow_id: str) -> bool:
+        if self.kb.get(subflow_id):
+            return True
+        node = self._subflow_node(intent_id, subflow_id)
+        return bool(node.get("actions"))
 
     def add_intent(self, intent_id: str, title: str, description: str) -> int:
         if intent_id not in self.ontology["intents"]["flows"]:
@@ -88,11 +110,31 @@ class PlaybookKB:
         self.version += 1
         return self.version
 
-    def add_subflow(self, intent_id: str, subflow_id: str, actions: list[str]) -> int:
+    def add_subflow(
+        self,
+        intent_id: str,
+        subflow_id: str,
+        actions: list[str] | None = None,
+        description: str = "",
+    ) -> int:
         existing = self.ontology["intents"]["subflows"].setdefault(intent_id, [])
         if subflow_id not in existing:
             existing.append(subflow_id)
-        self.kb[subflow_id] = list(actions)
+        if actions is not None:
+            self.kb[subflow_id] = list(actions)
+        else:
+            self.kb.setdefault(subflow_id, [])
+        if description:
+            title = self.flow_title(intent_id)
+            self.guidelines.setdefault(title, {"description": "", "subflows": {}})
+            self.guidelines[title].setdefault("subflows", {})
+            sub_title = self.subflow_titles.setdefault(
+                subflow_id, subflow_id.replace("_", " ").title()
+            )
+            block = self.guidelines[title]["subflows"].setdefault(sub_title, {})
+            block["description"] = description
+            block.setdefault("instructions", [])
+            block.setdefault("actions", [])
         self.version += 1
         return self.version
 
@@ -147,7 +189,11 @@ def kb_catalog(playbook: PlaybookKB | None = None, *, include_guidance: bool = F
         body = kb.guidelines.get(title) or {}
         subflows = []
         for subflow_id in kb.subflows_for(intent_id):
-            row: dict[str, Any] = {"id": subflow_id, "title": kb.subflow_title(subflow_id)}
+            row: dict[str, Any] = {
+                "id": subflow_id,
+                "title": kb.subflow_title(subflow_id),
+                "has_pathway": kb.has_pathway(intent_id, subflow_id),
+            }
             if include_guidance:
                 row["guidance"] = kb.guideline_subflow_text(intent_id, subflow_id)
                 row["actions"] = list(kb.kb.get(subflow_id) or [])

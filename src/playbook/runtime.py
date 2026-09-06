@@ -15,7 +15,7 @@ from playbook.topics import BertopicConfig, FitRule
 playbook: PlaybookKB | None = None
 store: TaskStore | None = None
 current_run_id: str | None = None
-method: str = "jaccard"
+method: str = "bertopic"
 topic_config: BertopicConfig | None = None
 min_sim: float = 0.60
 min_margin: float = 0.05
@@ -41,7 +41,7 @@ def configure_runtime(
     playbook_kb: PlaybookKB | None = None,
     conversations: list[dict[str, Any]] | None = None,
     load_env: bool = True,
-    method: str = "jaccard",
+    method: str = "bertopic",
     topic_config: BertopicConfig | None = None,
     min_sim: float = 0.60,
     min_margin: float = 0.05,
