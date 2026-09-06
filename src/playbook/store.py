@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -13,16 +14,37 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _remove_sqlite_files(path: Path) -> None:
+    for candidate in (path, Path(f"{path}-wal"), Path(f"{path}-shm")):
+        if candidate.exists():
+            candidate.unlink()
+
+
 class TaskStore:
+    """Process-local SQLite store.
+
+    LangGraph tools can run on worker threads, so each thread gets its own
+    connection to the same file. WAL keeps concurrent reads from colliding.
+    """
+
     def __init__(self, path: Path):
         path = Path(path)
-        if path.exists():
-            path.unlink()
+        _remove_sqlite_files(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(path)
-        self.conn.row_factory = sqlite3.Row
-        self.conn.execute("PRAGMA foreign_keys = ON")
+        self.path = path
+        self._local = threading.local()
         self._init_schema()
+
+    @property
+    def conn(self) -> sqlite3.Connection:
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = sqlite3.connect(self.path)
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA foreign_keys = ON")
+            conn.execute("PRAGMA journal_mode=WAL")
+            self._local.conn = conn
+        return conn
 
     def _init_schema(self) -> None:
         self.conn.executescript(

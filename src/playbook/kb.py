@@ -9,7 +9,7 @@ from typing import Any
 
 from playbook.scoring import jaccard
 
-DEFAULT_DATA_DIR = Path(__file__).resolve().parents[2] / "scratch_data"
+DEFAULT_DATA_DIR = Path(__file__).resolve().parents[2] / "scratch_data" / "eda"
 
 DEFAULT_FLOW_TITLES = {"account_access": "Account Access"}
 DEFAULT_SUBFLOW_TITLES = {
@@ -127,6 +127,43 @@ def load_conversations(data_dir: Path | None = None) -> list[dict[str, Any]]:
     return json.loads((root / "incoming_conversations.json").read_text(encoding="utf-8"))
 
 
+def _live_playbook(playbook: PlaybookKB | None) -> PlaybookKB:
+    if playbook is not None:
+        return playbook
+    from playbook import runtime
+
+    kb = runtime.playbook
+    if kb is None:
+        raise RuntimeError("Call configure_runtime() before reading the playbook.")
+    return kb
+
+
+def kb_catalog(playbook: PlaybookKB | None = None, *, include_guidance: bool = False) -> dict[str, Any]:
+    """Live taxonomy. Does not read seed files."""
+    kb = _live_playbook(playbook)
+    intents = []
+    for intent_id in kb.intent_ids():
+        title = kb.flow_title(intent_id)
+        body = kb.guidelines.get(title) or {}
+        subflows = []
+        for subflow_id in kb.subflows_for(intent_id):
+            row: dict[str, Any] = {"id": subflow_id, "title": kb.subflow_title(subflow_id)}
+            if include_guidance:
+                row["guidance"] = kb.guideline_subflow_text(intent_id, subflow_id)
+                row["actions"] = list(kb.kb.get(subflow_id) or [])
+            subflows.append(row)
+        intent_row: dict[str, Any] = {
+            "id": intent_id,
+            "title": title,
+            "description": body.get("description") or "",
+            "subflows": subflows,
+        }
+        if include_guidance:
+            intent_row["guidance"] = kb.guideline_intent_text(intent_id)
+        intents.append(intent_row)
+    return {"kb_version": kb.version, "intents": intents}
+
+
 def retrieve_guidance(
     query: str,
     playbook: PlaybookKB | None = None,
@@ -134,11 +171,7 @@ def retrieve_guidance(
     top_k: int = 4,
 ) -> list[dict[str, Any]]:
     """Rank current playbook intents by Jaccard against query text."""
-    kb = playbook
-    if kb is None:
-        from playbook import runtime
-
-        kb = runtime.playbook
+    kb = _live_playbook(playbook)
     ranked = []
     for intent_id in kb.intent_ids():
         doc = kb.intent_doc(intent_id)

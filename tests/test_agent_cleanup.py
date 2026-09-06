@@ -10,6 +10,7 @@ import pytest
 from playbook.topics import BertopicConfig
 
 ROOT = Path(__file__).resolve().parents[1]
+PLACEHOLDER_DATA_DIR = ROOT / "scratch_data"
 NOTEBOOK_PY = ROOT / "scratch_modular_meta_agent.py"
 DEMO_TOPIC_CONFIG = BertopicConfig(
     min_to_cluster=2,
@@ -27,6 +28,7 @@ def runtime(tmp_path):
     from playbook import configure_runtime
 
     return configure_runtime(
+        data_dir=PLACEHOLDER_DATA_DIR,
         store_path=tmp_path / "run_store.sqlite",
         method="jaccard",
         topic_config=DEMO_TOPIC_CONFIG,
@@ -85,10 +87,20 @@ def test_playbook_loader_and_retriever_are_independent():
     from playbook import load_playbook, retrieve_guidance
 
     playbook = load_playbook()
-    assert playbook.intent_ids() == ["account_access"]
-    assert playbook.subflows_for("account_access") == ["recover_username", "recover_password"]
+    assert playbook.intent_ids() == ["account_access", "order_issue"]
+    assert playbook.subflows_for("account_access") == [
+        "recover_username",
+        "recover_password",
+        "reset_2fa",
+    ]
+    assert playbook.subflows_for("order_issue") == [
+        "status_mystery_fee",
+        "status_delivery_time",
+        "manage_upgrade",
+        "manage_cancel",
+    ]
     assert "recover_username" in playbook.kb
-    assert "reset_2fa" not in playbook.kb
+    assert "reset_2fa" in playbook.kb
 
     ranked = retrieve_guidance(
         "I forgot my username and cannot log into my account.",
@@ -157,6 +169,8 @@ def test_agent_flow_reaches_decision_and_review_states(runtime, stub_topic_fit):
 
     accepted_new_intent = {"proposal_type": "new_intent", "candidate": "shipping_issue"}
     assert simulate_hitl(accepted_new_intent)[0] == "accept"
+    assert simulate_hitl({"proposal_type": "new_intent", "candidate": "new_intent"})[0] == "accept"
+    assert simulate_hitl({"proposal_type": "new_subflow", "candidate": "status_payment_method"})[0] == "accept"
     assert simulate_hitl({"proposal_type": "outlier", "candidate": None})[0] == "decline"
 
     assert "shipping_issue" in rt.playbook.intent_ids()

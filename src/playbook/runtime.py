@@ -14,6 +14,7 @@ from playbook.topics import BertopicConfig, FitRule
 
 playbook: PlaybookKB | None = None
 store: TaskStore | None = None
+current_run_id: str | None = None
 method: str = "jaccard"
 topic_config: BertopicConfig | None = None
 min_sim: float = 0.60
@@ -47,8 +48,9 @@ def configure_runtime(
     fit_rule: FitRule = "either",
 ) -> tuple[PlaybookKB, TaskStore]:
     """Load the seed playbook and rebuild the working store. Does not invoke the agent."""
-    global playbook, store
+    global playbook, store, current_run_id
     from playbook import runtime as rt
+    current_run_id = None
 
     root = Path(data_dir) if data_dir is not None else DEFAULT_DATA_DIR
     if load_env:

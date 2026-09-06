@@ -11,7 +11,7 @@ from typing import Any, Sequence
 from playbook.config import ABCD_JSON, GUIDELINES_JSON
 from playbook.kb import DEFAULT_DATA_DIR
 
-EDA_DATA_DIR = DEFAULT_DATA_DIR / "eda"
+EDA_DATA_DIR = DEFAULT_DATA_DIR
 
 
 def _require(path: Path) -> Path:

@@ -11,6 +11,7 @@ from playbook.schemas import ConversationRecord, DiscoveredTopic
 from playbook.topics import BertopicConfig
 
 ROOT = Path(__file__).resolve().parents[1]
+PLACEHOLDER_DATA_DIR = ROOT / "scratch_data"
 DEMO_TOPIC_CONFIG = BertopicConfig(
     min_to_cluster=2,
     min_cluster_size=2,
@@ -27,6 +28,7 @@ def runtime(tmp_path):
     from playbook import configure_runtime
 
     return configure_runtime(
+        data_dir=PLACEHOLDER_DATA_DIR,
         store_path=tmp_path / "run_store.sqlite",
         method="jaccard",
         topic_config=DEMO_TOPIC_CONFIG,
@@ -38,6 +40,7 @@ def bertopic_runtime(tmp_path):
     from playbook import configure_runtime
 
     return configure_runtime(
+        data_dir=PLACEHOLDER_DATA_DIR,
         store_path=tmp_path / "run_store.sqlite",
         method="bertopic",
         topic_config=DEMO_TOPIC_CONFIG,
@@ -175,6 +178,7 @@ def test_existing_decision_and_hitl_flow_still_works(runtime, stub_topic_fit):
     assert any(row["candidate"] == "reset_2fa" and row["review_decision"] == "accept" for row in proposals)
     assert any(row["proposal_type"] == "emerging" and row["review_decision"] == "decline" for row in proposals)
     assert simulate_hitl({"proposal_type": "new_intent", "candidate": "shipping_issue"})[0] == "accept"
+    assert simulate_hitl({"proposal_type": "new_intent", "candidate": "new_intent"})[0] == "accept"
     assert "shipping_issue" in rt.playbook.intent_ids()
     assert "reset_2fa" in rt.playbook.subflows_for("account_access")
     assert "missing" in rt.playbook.subflows_for("shipping_issue")
@@ -289,7 +293,11 @@ def test_jaccard_method_does_not_call_bertopic(tmp_path, monkeypatch):
     from playbook import configure_runtime, invoke_week
     from playbook.topics import TopicDiscoveryResult
 
-    configure_runtime(store_path=tmp_path / "run_store.sqlite", method="jaccard")
+    configure_runtime(
+        data_dir=PLACEHOLDER_DATA_DIR,
+        store_path=tmp_path / "run_store.sqlite",
+        method="jaccard",
+    )
 
     def boom(*_args, **_kwargs):
         raise AssertionError("BERTopic path should not run when METHOD=jaccard")
@@ -336,10 +344,11 @@ def test_start_end_selects_the_cohort_window(tmp_path, stub_topic_fit):
     from playbook import build_graph, configure_runtime, load_conversations
     from playbook import runtime as rt
 
-    conversations = load_conversations()
+    conversations = load_conversations(PLACEHOLDER_DATA_DIR)
     for i, row in enumerate(conversations):
         row["conversation_date"] = "2026-08-01" if i == 0 else "2026-09-01"
     configure_runtime(
+        data_dir=PLACEHOLDER_DATA_DIR,
         store_path=tmp_path / "run_store.sqlite",
         method="jaccard",
         topic_config=DEMO_TOPIC_CONFIG,
