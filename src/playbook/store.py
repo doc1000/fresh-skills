@@ -227,7 +227,7 @@ class TaskStore:
             "SELECT payload FROM staging WHERE run_id = ? AND stage = ?",
             (run_id, stage),
         ).fetchone()
-        return json.loads(row["payload"]) if row else []
+        return json.loads(row["payload"]) if row else None
 
     def persist_intent_labels(self, rows: list[dict[str, Any]]) -> None:
         self.conn.executemany(

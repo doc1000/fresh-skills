@@ -65,6 +65,7 @@ class MetaAgentState(TypedDict, total=False):
 
 
 SUMMARY_ID_CAP = 20
+SUMMARY_TASK_IDS = 10
 SAMPLE_N_MAX = 5
 TASK_IDS_MAX = 2
 
@@ -367,12 +368,26 @@ def public_task(task: dict[str, Any], run_id: str = "") -> dict[str, Any]:
     }
 
 
+def _as_list(value: Any) -> list[Any]:
+    if not value:
+        return []
+    if isinstance(value, str):
+        value = json.loads(value)
+    return list(value)
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    if not value:
+        return {}
+    if isinstance(value, str):
+        value = json.loads(value)
+    return dict(value)
+
+
 def proposal_changes(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     changes = []
     for row in rows:
-        supporting = row.get("supporting_task_ids") or []
-        if isinstance(supporting, str):
-            supporting = json.loads(supporting)
+        supporting = _as_list(row.get("supporting_task_ids"))
         changes.append(
             {
                 "proposal_id": row.get("proposal_id"),
@@ -380,8 +395,12 @@ def proposal_changes(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "candidate": row.get("candidate"),
                 "parent": row.get("parent_intent"),
                 "decision": row.get("review_decision"),
-                "n_tasks": len(supporting or []),
+                "n_tasks": len(supporting),
                 "kb_version": row.get("resulting_kb_version"),
+                "examples": _as_list(row.get("examples")),
+                "metrics": _as_dict(row.get("metrics")),
+                "review_note": row.get("review_note"),
+                "supporting_task_ids": supporting[:SUMMARY_TASK_IDS],
             }
         )
     return changes
@@ -400,7 +419,7 @@ def cohort_process(state: MetaAgentState) -> dict[str, Any]:
 
 def cohort_persist(state: MetaAgentState) -> dict[str, Any]:
     run_id = state["run_id"]
-    query = runtime.store.get_staging(run_id, "cohort_query")
+    query = runtime.store.get_staging(run_id, "cohort_query") or {}
     ids = runtime.store.get_workset(run_id, "cohort")
     runtime.store.create_run(run_id, query, runtime.playbook.version)
     runtime.store.add_cohort(run_id, ids)
@@ -490,7 +509,7 @@ def intent_process(state: MetaAgentState) -> dict[str, Any]:
 
 
 def intent_persist(state: MetaAgentState) -> dict[str, Any]:
-    staged = runtime.store.get_staging(state["run_id"], "intent")
+    staged = runtime.store.get_staging(state["run_id"], "intent") or []
     rows = [
         {
             "task_id": row["task_id"],
@@ -530,7 +549,7 @@ def _intent_summary(run_id: str, processed: list[dict[str, Any]]) -> dict[str, A
 
 
 def intent_summarize(state: MetaAgentState) -> dict[str, Any]:
-    processed = runtime.store.get_staging(state["run_id"], "intent")
+    processed = runtime.store.get_staging(state["run_id"], "intent") or []
     summary = _intent_summary(state["run_id"], processed)
     return {
         "current_stage": "summarize_intent_assignments",
@@ -617,7 +636,7 @@ def subflow_process(state: MetaAgentState) -> dict[str, Any]:
 
 
 def subflow_persist(state: MetaAgentState) -> dict[str, Any]:
-    staged = runtime.store.get_staging(state["run_id"], "subflow")
+    staged = runtime.store.get_staging(state["run_id"], "subflow") or []
     rows = [
         {
             "task_id": row["task_id"],
@@ -661,7 +680,7 @@ def _subflow_summary(run_id: str, processed: list[dict[str, Any]]) -> dict[str, 
 
 
 def subflow_summarize(state: MetaAgentState) -> dict[str, Any]:
-    processed = runtime.store.get_staging(state["run_id"], "subflow")
+    processed = runtime.store.get_staging(state["run_id"], "subflow") or []
     return {
         "current_stage": "summarize_subflow_assignments",
         "subflow_summary": _subflow_summary(state["run_id"], processed),
@@ -708,7 +727,7 @@ def intent_discovery_discover(state: MetaAgentState) -> dict[str, Any]:
 
 
 def intent_discovery_validate(state: MetaAgentState) -> dict[str, Any]:
-    clusters = runtime.store.get_staging(state["run_id"], "intent_discovery_clusters")
+    clusters = runtime.store.get_staging(state["run_id"], "intent_discovery_clusters") or []
     candidates = []
     for cluster in clusters:
         task_ids = cluster["task_ids"]
@@ -751,7 +770,7 @@ def intent_discovery_validate(state: MetaAgentState) -> dict[str, Any]:
 
 def intent_discovery_persist_proposal(state: MetaAgentState) -> dict[str, Any]:
     pending_ids = []
-    for cand in runtime.store.get_staging(state["run_id"], "intent_discovery"):
+    for cand in runtime.store.get_staging(state["run_id"], "intent_discovery") or []:
         proposal_id = new_id("prop")
         pending_ids.append(proposal_id)
         runtime.store.persist_proposal(
@@ -775,7 +794,7 @@ def intent_discovery_persist_proposal(state: MetaAgentState) -> dict[str, Any]:
 
 
 def intent_discovery_hitl(state: MetaAgentState) -> dict[str, Any]:
-    ids = runtime.store.get_staging(state["run_id"], "intent_discovery_ids")
+    ids = runtime.store.get_staging(state["run_id"], "intent_discovery_ids") or []
     for proposal in runtime.store.list_proposals(state["run_id"]):
         if proposal["proposal_id"] not in ids:
             continue
@@ -906,7 +925,7 @@ def subflow_discovery_discover(state: MetaAgentState) -> dict[str, Any]:
 
 def subflow_discovery_validate(state: MetaAgentState) -> dict[str, Any]:
     candidates = []
-    for cluster in runtime.store.get_staging(state["run_id"], "subflow_discovery_clusters"):
+    for cluster in runtime.store.get_staging(state["run_id"], "subflow_discovery_clusters") or []:
         task_ids = cluster["task_ids"]
         intent_id = cluster["intent_id"]
         mean = mean_pairwise_jaccard(task_ids)
@@ -943,7 +962,7 @@ def subflow_discovery_validate(state: MetaAgentState) -> dict[str, Any]:
 
 def subflow_discovery_persist_proposal(state: MetaAgentState) -> dict[str, Any]:
     pending_ids = []
-    for cand in runtime.store.get_staging(state["run_id"], "subflow_discovery"):
+    for cand in runtime.store.get_staging(state["run_id"], "subflow_discovery") or []:
         proposal_id = new_id("prop")
         pending_ids.append(proposal_id)
         runtime.store.persist_proposal(
@@ -967,7 +986,7 @@ def subflow_discovery_persist_proposal(state: MetaAgentState) -> dict[str, Any]:
 
 
 def subflow_discovery_hitl(state: MetaAgentState) -> dict[str, Any]:
-    ids = runtime.store.get_staging(state["run_id"], "subflow_discovery_ids")
+    ids = runtime.store.get_staging(state["run_id"], "subflow_discovery_ids") or []
     for proposal in runtime.store.list_proposals(state["run_id"]):
         if proposal["proposal_id"] not in ids:
             continue
@@ -1116,7 +1135,7 @@ def pathway_analyze(state: MetaAgentState) -> dict[str, Any]:
 
 def pathway_recommend(state: MetaAgentState) -> dict[str, Any]:
     subflow_id = state["target_subflow"]
-    payload = dict(runtime.store.get_staging(state["run_id"], f"pathway:{subflow_id}"))
+    payload = dict(runtime.store.get_staging(state["run_id"], f"pathway:{subflow_id}") or {})
     latest = runtime.store.latest_subflows(state["run_id"])
     sample_id = (payload.get("task_ids") or [None])[0]
     sample_row = latest.get(sample_id) if sample_id else None
@@ -1149,7 +1168,7 @@ def pathway_recommend(state: MetaAgentState) -> dict[str, Any]:
 
 def pathway_evaluate(state: MetaAgentState) -> dict[str, Any]:
     subflow_id = state["target_subflow"]
-    payload = dict(runtime.store.get_staging(state["run_id"], f"pathway:{subflow_id}"))
+    payload = dict(runtime.store.get_staging(state["run_id"], f"pathway:{subflow_id}") or {})
     ok = (
         payload.get("successful", 0) >= MIN_SUCCESS_FOR_PATTERN
         and payload.get("support", 0) >= PATTERN_SUPPORT
@@ -1166,7 +1185,7 @@ def pathway_evaluate(state: MetaAgentState) -> dict[str, Any]:
 
 def pathway_persist(state: MetaAgentState) -> dict[str, Any]:
     subflow_id = state["target_subflow"]
-    payload = runtime.store.get_staging(state["run_id"], f"pathway:{subflow_id}")
+    payload = runtime.store.get_staging(state["run_id"], f"pathway:{subflow_id}") or {}
     rec_id = new_id("rec")
     runtime.store.persist_recommendation(
         {
@@ -1193,16 +1212,21 @@ def pathway_persist(state: MetaAgentState) -> dict[str, Any]:
 
 def pathway_summarize(state: MetaAgentState) -> dict[str, Any]:
     subflow_id = state["target_subflow"]
-    payload = runtime.store.get_staging(state["run_id"], f"pathway:{subflow_id}")
+    payload = runtime.store.get_staging(state["run_id"], f"pathway:{subflow_id}") or {}
     rec_id = runtime.store.get_staging(state["run_id"], f"pathway:{subflow_id}:rec_id")
+    task_ids = list(payload.get("task_ids") or [])
+    evaluation = payload.get("evaluation") or {}
     item = {
         "subflow_id": subflow_id,
         "intent_id": payload.get("intent_id"),
-        "supported": payload.get("evaluation", {}).get("supported"),
-        "n_tasks": len(payload.get("task_ids") or []),
-        "support": payload.get("evaluation", {}).get("support"),
+        "supported": evaluation.get("supported"),
+        "n_tasks": len(task_ids),
+        "support": evaluation.get("support"),
         "draft_headline": " → ".join(payload.get("actions") or []) or None,
-        "evaluation": payload.get("evaluation"),
+        "evaluation": evaluation,
+        "examples": _examples(task_ids),
+        "metrics": evaluation,
+        "supporting_task_ids": task_ids[:SUMMARY_TASK_IDS],
     }
     if rec_id:
         item["rec_id"] = rec_id
@@ -1220,6 +1244,9 @@ def pathway_summarize(state: MetaAgentState) -> dict[str, Any]:
             "n_tasks": item["n_tasks"],
             "kb_version": runtime.playbook.version if item.get("supported") and rec_id else None,
             "rec_id": rec_id or None,
+            "examples": item["examples"],
+            "metrics": evaluation,
+            "supporting_task_ids": item["supporting_task_ids"],
         }
     ]
     return {

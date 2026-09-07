@@ -317,12 +317,24 @@ def recommend_pathway(target_subflow: str, run_id: str = "") -> dict:
 
 @tool
 def persist_recc(target_subflow: str, run_id: str = "") -> dict:
-    """Persist an evaluated pathway recommendation into the store and knowledge base.
+    """Commit an approved pathway draft to the store and knowledge base.
 
-    Call this after recommend_pathway. Unsupported drafts are stored
-    but not attached to the live knowledge base."""
+    Call only after recommend_pathway and review. This does not search,
+    inspect proposals, or run discovery. A missing draft returns an error
+    instead of writing. Unsupported drafts are stored but not attached
+    to the live knowledge base."""
     _require_runtime()
     rid = _run_id(run_id)
+    payload = runtime.store.get_staging(rid, f"pathway:{target_subflow}")
+    if not isinstance(payload, dict):
+        return {
+            "ok": False,
+            "error": (
+                f"no pathway draft for {target_subflow}; "
+                "call recommend_pathway first, then persist_recc after approval"
+            ),
+            "target_subflow": target_subflow,
+        }
     state = empty_state(run_id=rid, target_subflow=target_subflow)
     persisted = pathway_persist(state)
     summarized = pathway_summarize(state)

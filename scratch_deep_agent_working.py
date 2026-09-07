@@ -33,9 +33,6 @@
 # ```
 
 # %%
-hf auth whoami
-
-# %%
 from sentence_transformers import SentenceTransformer
 SentenceTransformer("all-MiniLM-L6-v2")
 
@@ -166,6 +163,20 @@ def user_message(agent, content, thread_id):
 
 
 # %%
+starting_intro = """
+Hello.  I am ready to identify customer service call intentions (intent) and sub-intentions (subflow).
+I can: 
+- Classify tasks according to intents that are in the knowledge base (kb).
+- Discover new intent and subflows and can add them to the knowledge base.
+- Reccomend pathways or agent workflows that succeeded for subflows and write them as guidelines in the knowledge base.
+- explore the current kb
+- run all processes to first classify according the existing kb, then discover new intents and subflows, and finally recommend to workflows
+
+Pass date range or I will simply look for unclassified tasks.
+
+"""
+
+# %%
 from langchain.chat_models import init_chat_model
 
 if os.environ.get("OPENAI_API_KEY"):
@@ -174,7 +185,7 @@ if os.environ.get("OPENAI_API_KEY"):
     # or construct it yourself:
     # agent = create_deep_agent(model=model, tools=[...], system_prompt=SYSTEM_PROMPT)
     content = """
-    "Classify the 2026-09-01 to 2026-09-07 cohort with jaccard. 
+    "Classify the 2026-08-25 to 2026-09-08 cohort with bertopic. 
     Stop after classification unless unresolved tasks clearly need discovery.
     """
     user_message(agent, content, thread_id)    
@@ -184,48 +195,48 @@ else:
     print(SYSTEM_PROMPT.splitlines()[0])
 
 # %%
-content = """yes, run discovery over this cohort"""
+content = """let's classify sept 9-12th"""
 user_message(agent, content, thread_id)
 
 # %%
-content = """what is the name of the new intent?"""
+content = """run discovery"""
 user_message(agent, content, thread_id)
 
 # %%
-content = """what are the available intent labels in the kb?"""
+content = """what new intents were rejected?"""
 user_message(agent, content, thread_id)
 
 # %%
-content = """yes, classify unresolved tasks with the new intent"""
+content = """what else needs to be done?"""
 user_message(agent, content, thread_id)
 
 # %%
-content = """classify empty subflows"""
+content = """classify the subflows"""
 user_message(agent, content, thread_id)
 
 # %%
-content = """what are the existing subflows in the kb?"""
+content = """discover new subflows over the the range 9-9-26 to 9-12-26"""
 user_message(agent, content, thread_id)
 
 # %%
-content = """go ahead and classify using existing subflows"""
+content = """recommend pathways"""
 user_message(agent, content, thread_id)
 
 # %%
 
-content = """why were none classified to existing subflows?"""
+content = """what are the recommended paths that were rejected?  i want more details"""
 user_message(agent, content, thread_id)
 
 # %%
-content = """yes, discover new subflows"""
+content = """approve the payment_status_payment_method pathway"""
 user_message(agent, content, thread_id)
 
 # %%
-content = """tell me about the emerging subflow proposals"""
+content = """what are the current intents and subflows?"""
 user_message(agent, content, thread_id)
 
 # %%
-content = """can you get task summaries for a sample from prop_efba1912"""
+content = """show me the pathway for payment status payment method"""
 user_message(agent, content, thread_id)
 
 # %%

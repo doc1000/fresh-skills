@@ -36,6 +36,12 @@ def runtime(tmp_path):
     )
 
 
+def test_get_staging_miss_returns_none(runtime):
+    from playbook import runtime as rt
+
+    assert rt.store.get_staging("missing-run", "missing-stage") is None
+
+
 def test_store_set_staging_from_other_threads(runtime):
     from playbook import runtime as rt
 
@@ -112,12 +118,26 @@ def test_recommend_then_persist_recc(runtime, stub_topic_fit):
     )
     classify_intent.invoke({})
     classify_subflow.invoke({})
-    discover_intent.invoke({})
+    discovered = discover_intent.invoke({})
     discover_subflow.invoke({})
+    intent_changes = discovered["discovery_summary"]["intents"]["changes"]
+    assert intent_changes
+    row = intent_changes[0]
+    assert "examples" in row
+    assert "metrics" in row
+    assert "review_note" in row
+    assert "supporting_task_ids" in row
+    assert len(row["supporting_task_ids"]) <= 10
 
     draft = recommend_pathway.invoke({"target_subflow": "reset_2fa"})
     assert draft["target_subflow"] == "reset_2fa"
     assert rt.store.list_recommendations("week-tools") == []
+    change = draft["recommendation_summary"]["changes"][0]
+    assert "examples" in change
+    assert "metrics" in change
+    assert "supporting_task_ids" in change
+    assert "review_note" not in change
+    assert len(change["supporting_task_ids"]) <= 10
 
     saved = persist_recc.invoke({"target_subflow": "reset_2fa"})
     assert saved["rec_id"]
@@ -125,6 +145,28 @@ def test_recommend_then_persist_recc(runtime, stub_topic_fit):
     assert recs
     assert recs[0]["subflow_id"] == "reset_2fa"
     assert "changes" in saved["recommendation_summary"]
+    saved_change = saved["recommendation_summary"]["changes"][0]
+    assert "examples" in saved_change
+    assert "supporting_task_ids" in saved_change
+
+
+def test_persist_recc_without_draft_returns_error(runtime):
+    from playbook import cohort, persist_recc
+    from playbook import runtime as rt
+
+    cohort.invoke(
+        {
+            "start_date": "2026-09-01",
+            "end_date": "2026-09-07",
+            "method": "jaccard",
+            "run_id": "no-draft",
+        }
+    )
+    out = persist_recc.invoke({"target_subflow": "reset_2fa"})
+    assert out["ok"] is False
+    assert "recommend_pathway" in out["error"]
+    assert out["target_subflow"] == "reset_2fa"
+    assert rt.store.list_recommendations("no-draft") == []
 
 
 def test_retrieve_guidance_tool_catalog_and_query(runtime):
@@ -227,7 +269,15 @@ def test_cohort_filter_persist_and_richer_summaries(runtime, stub_topic_fit):
     )
 
     discovered = discover_intent.invoke({})
+    changes = discovered["discovery_summary"]["intents"]["changes"]
     assert "changes" in discovered["discovery_summary"]["intents"]
+    if changes:
+        row = changes[0]
+        assert "examples" in row
+        assert "metrics" in row
+        assert "review_note" in row
+        assert "supporting_task_ids" in row
+        assert len(row["supporting_task_ids"]) <= 10
 
 
 def test_empty_path_subflow_is_classifiable(runtime, stub_topic_fit):
@@ -281,6 +331,12 @@ def test_discover_subflow_persists_emerging_without_pathway(runtime, stub_topic_
     discovered = discover_subflow.invoke({})
     summary = discovered["discovery_summary"]["subflows"]
     assert summary["candidate_count"] >= 0
+    if summary["changes"]:
+        row = summary["changes"][0]
+        assert "examples" in row
+        assert "metrics" in row
+        assert "review_note" in row
+        assert "supporting_task_ids" in row
     emerging = [
         row
         for row in rt.store.list_proposals("emerging-run")
