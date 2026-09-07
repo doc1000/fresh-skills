@@ -24,12 +24,10 @@ from playbook.topics import (
     BertopicConfig,
     TopicDiscoveryResult,
     TopicInfo,
-    apply_fit_rule,
-    centroid_matrix,
     classify_against,
     embed_texts,
-    resolve_label,
 )
+from playbook.vectors import KB_KIND_INTENT_GUIDE, KB_KIND_SUBFLOW, kb_doc_id_subflow
 
 FitRule = Literal["centroid", "guideline", "either", "both"]
 
@@ -162,6 +160,51 @@ def jaccard_topic_result(
     )
 
 
+def _task_embeddings(records: Sequence[ConversationRecord]) -> np.ndarray:
+    from playbook import runtime as rt
+
+    task_ids = [record.conversation_id for record in records]
+    if rt.vectors is not None:
+        ordered, matrix = rt.vectors.task_matrix(task_ids)
+        if len(ordered) == len(task_ids):
+            return matrix
+    documents = [conversation_document(record) for record in records]
+    fn = rt.embed_fn or embed_texts
+    return fn(documents)
+
+
+def _guideline_embeddings(
+    playbook: PlaybookKB,
+    names: Sequence[str],
+    *,
+    kind: Literal["intent", "subflow"],
+    parent_intent: str | None,
+) -> tuple[list[str], np.ndarray]:
+    from playbook import runtime as rt
+
+    label_names = list(names)
+    if kind == "intent":
+        guide_kind = KB_KIND_INTENT_GUIDE
+        doc_ids = label_names
+    else:
+        guide_kind = KB_KIND_SUBFLOW
+        intent_id = parent_intent or ""
+        doc_ids = [kb_doc_id_subflow(intent_id, name) for name in label_names]
+
+    if rt.vectors is not None:
+        stored_ids, matrix, _ = rt.vectors.kb_matrix(guide_kind, doc_ids)
+        if len(stored_ids) == len(doc_ids):
+            return label_names, matrix
+
+    if kind == "intent":
+        guide_docs = [playbook.guideline_intent_text(name) for name in label_names]
+    else:
+        intent_id = parent_intent or ""
+        guide_docs = [playbook.subflow_doc(intent_id, name) for name in label_names]
+    fn = rt.embed_fn or embed_texts
+    return label_names, fn(guide_docs)
+
+
 def _prototype_rows(
     conversations: Sequence[ConversationRecord],
     playbook: PlaybookKB,
@@ -174,77 +217,34 @@ def _prototype_rows(
     min_margin: float,
     fit_rule: FitRule,
 ) -> list[dict[str, Any]]:
+    del seed_examples, fit_rule  # guideline-only cosine; centroids removed
     records = list(conversations)
     if not records or not names:
         return []
-    documents = [conversation_document(record) for record in records]
-    embeddings = embed_texts(documents)
-
-    centroid_names = list(names)
-    seed_docs: list[str] = []
-    seed_labels: list[str] = []
-    for item in seed_examples:
-        scenario = item.get("scenario") or {}
-        label = scenario.get("flow") if kind == "intent" else scenario.get("subflow")
-        if kind == "subflow" and parent_intent and scenario.get("flow") != parent_intent:
-            continue
-        if label not in centroid_names:
-            continue
-        seed_docs.append(_example_document(item))
-        seed_labels.append(str(label))
-
-    centroid_matches = None
-    if seed_docs:
-        seeded_names = [name for name in centroid_names if name in set(seed_labels)]
-        if seeded_names:
-            prototypes = centroid_matrix(embed_texts(seed_docs), seed_labels, seeded_names)
-            centroid_matches = classify_against(
-                embeddings, prototypes, seeded_names, min_sim=min_sim, min_margin=min_margin
-            )
-
-    if kind == "intent":
-        guide_docs = [playbook.guideline_intent_text(name) for name in centroid_names]
-    else:
-        intent_id = parent_intent or ""
-        guide_docs = [playbook.subflow_doc(intent_id, name) for name in centroid_names]
+    embeddings = _task_embeddings(records)
+    guide_names, guide_matrix = _guideline_embeddings(
+        playbook, names, kind=kind, parent_intent=parent_intent
+    )
     guideline_matches = classify_against(
         embeddings,
-        embed_texts(guide_docs),
-        centroid_names,
+        guide_matrix,
+        guide_names,
         min_sim=min_sim,
         min_margin=min_margin,
     )
 
     rows: list[dict[str, Any]] = []
     for index, record in enumerate(records):
-        centroid = centroid_matches[index] if centroid_matches is not None else None
         guideline = guideline_matches[index]
-        fits_c = bool(centroid.fits) if centroid is not None else False
-        pred_c = centroid.pred if centroid is not None else ""
-        sim_c = centroid.sim if centroid is not None else 0.0
-        assigned = apply_fit_rule(fits_c, bool(guideline.fits), fit_rule)
-        label = resolve_label(
-            fits_c,
-            pred_c,
-            sim_c,
-            bool(guideline.fits),
-            guideline.pred,
-            guideline.sim,
-            fit_rule,
-        )
-        confidence = 0.0
-        if label == pred_c:
-            confidence = sim_c
-        elif label == guideline.pred:
-            confidence = guideline.sim
+        label = guideline.pred if guideline.fits else None
         rows.append(
             {
                 "conversation_id": record.conversation_id,
-                "assigned": assigned and label is not None,
+                "assigned": bool(guideline.fits and label),
                 "label": label,
-                "confidence": round(float(confidence), 3),
-                "centroid_pred": pred_c,
-                "centroid_sim": round(float(sim_c), 3),
+                "confidence": round(float(guideline.sim), 3) if guideline.fits else 0.0,
+                "centroid_pred": "",
+                "centroid_sim": 0.0,
                 "guideline_pred": guideline.pred,
                 "guideline_sim": round(float(guideline.sim), 3),
             }

@@ -34,7 +34,7 @@ The task store contains customer-support interactions with timestamps, intent la
 
 Your job is to maintain and improve this knowledge using the available tools. Do not assume a fixed workflow. Select and reuse tools based on the user's request and the evidence you find.
 
-Use `retrieve_guidance` to inspect the live knowledge base. An empty query returns the current intent and subflow catalog. Each subflow includes has_pathway. Pass a query to rank existing intents. Set include_guidance to read guideline text. This is the live playbook, not seed data.
+Use `retrieve_guidance` to inspect the live knowledge base. An empty query returns the current intent and subflow catalog. Each subflow includes has_pathway. Pass a query to rank existing intents. Set include_guidance to read guideline text.
 
 Use `cohort` to retrieve the tasks needed for an analysis. Cohorts may be selected by date, intent, subflow, labeling status, or other supported criteria. A persist call (filters only, no sample_n or task_ids) replaces the working set used by later tools and returns a run_id. A filtered persist is the new working set — classify and discover will only see that slice, not the previous broader cohort. sample_n or task_ids is a peek: it does not replace the working set and does not return a run_id. Broaden or refine the persisted cohort when the available evidence is insufficient.
 
@@ -133,7 +133,7 @@ def retrieve_guidance(
     """Read the live knowledge base.
 
     Empty query: intent and subflow catalog.
-    Query text: rank existing intents (Jaccard).
+    Query text: rank existing intents (cosine on stored embeddings).
     include_guidance: add guideline text."""
     _require_runtime()
     if query.strip():

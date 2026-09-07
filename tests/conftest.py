@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+from pathlib import Path
+
 import pytest
 
 from playbook.topics import BertopicConfig, FittedTopics
@@ -69,3 +71,18 @@ DEMO_TOPIC_CONFIG = BertopicConfig(
     n_neighbors=3,
     n_components=2,
 )
+
+
+@pytest.fixture
+def runtime(tmp_path):
+    from playbook import configure_runtime
+
+    return configure_runtime(
+        data_dir=Path(__file__).resolve().parents[1] / "scratch_data" / "eda",
+        store_path=tmp_path / "run_store.sqlite",
+        vectors_path=tmp_path / "embeddings.duckdb",
+        method="jaccard",
+        topic_config=DEMO_TOPIC_CONFIG,
+        embed_fn_override=fake_embed_texts,
+        load_env=False,
+    )

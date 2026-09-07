@@ -25,25 +25,33 @@ DEMO_TOPIC_CONFIG = BertopicConfig(
 
 @pytest.fixture
 def runtime(tmp_path):
+    import conftest as test_conf
     from playbook import configure_runtime
 
     return configure_runtime(
-        data_dir=PLACEHOLDER_DATA_DIR,
+        data_dir=PLACEHOLDER_DATA_DIR / "eda",
         store_path=tmp_path / "run_store.sqlite",
+        vectors_path=tmp_path / "embeddings.duckdb",
         method="jaccard",
         topic_config=DEMO_TOPIC_CONFIG,
+        embed_fn_override=test_conf.fake_embed_texts,
+        load_env=False,
     )
 
 
 @pytest.fixture
 def bertopic_runtime(tmp_path):
+    import conftest as test_conf
     from playbook import configure_runtime
 
     return configure_runtime(
-        data_dir=PLACEHOLDER_DATA_DIR,
+        data_dir=PLACEHOLDER_DATA_DIR / "eda",
         store_path=tmp_path / "run_store.sqlite",
+        vectors_path=tmp_path / "embeddings.duckdb",
         method="bertopic",
         topic_config=DEMO_TOPIC_CONFIG,
+        embed_fn_override=test_conf.fake_embed_texts,
+        load_env=False,
     )
 
 
@@ -283,13 +291,17 @@ def test_task_adapter_strips_store_labels():
 
 
 def test_jaccard_method_does_not_call_bertopic(tmp_path, monkeypatch):
+    import conftest as test_conf
     from playbook import configure_runtime, invoke_week
     from playbook.topics import TopicDiscoveryResult
 
     configure_runtime(
-        data_dir=PLACEHOLDER_DATA_DIR,
+        data_dir=PLACEHOLDER_DATA_DIR / "eda",
         store_path=tmp_path / "run_store.sqlite",
+        vectors_path=tmp_path / "embeddings.duckdb",
         method="jaccard",
+        embed_fn_override=test_conf.fake_embed_texts,
+        load_env=False,
     )
 
     def boom(*_args, **_kwargs):
@@ -334,18 +346,22 @@ def test_public_entrypoint_is_agent_invoke(runtime, stub_topic_fit):
 
 
 def test_start_end_selects_the_cohort_window(tmp_path, stub_topic_fit):
+    import conftest as test_conf
     from playbook import build_graph, configure_runtime, load_conversations
     from playbook import runtime as rt
 
-    conversations = load_conversations(PLACEHOLDER_DATA_DIR)
+    conversations = load_conversations(PLACEHOLDER_DATA_DIR / "eda")
     for i, row in enumerate(conversations):
         row["conversation_date"] = "2026-08-01" if i == 0 else "2026-09-01"
     configure_runtime(
-        data_dir=PLACEHOLDER_DATA_DIR,
+        data_dir=PLACEHOLDER_DATA_DIR / "eda",
         store_path=tmp_path / "run_store.sqlite",
+        vectors_path=tmp_path / "embeddings.duckdb",
         method="jaccard",
         topic_config=DEMO_TOPIC_CONFIG,
         conversations=conversations,
+        embed_fn_override=test_conf.fake_embed_texts,
+        load_env=False,
     )
     agent = build_graph()
     result = agent.invoke(

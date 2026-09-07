@@ -215,6 +215,7 @@ def fit_topic_model(
     config: BertopicConfig | None = None,
     *,
     embedding_model: str | Any | None = None,
+    embeddings: np.ndarray | None = None,
 ) -> FittedTopics:
     """Fit BERTopic and return topic ids + descriptors only."""
     from bertopic import BERTopic
@@ -250,7 +251,10 @@ def fit_topic_model(
         calculate_probabilities=False,
         verbose=False,
     )
-    topic_ids, _ = model.fit_transform(docs)
+    if embeddings is not None:
+        topic_ids, _ = model.fit_transform(docs, embeddings=embeddings)
+    else:
+        topic_ids, _ = model.fit_transform(docs)
     topic_ids = [int(topic_id) for topic_id in topic_ids]
     descriptors: dict[int, str] = {}
     for topic_id in set(topic_ids):
@@ -312,10 +316,20 @@ def discover_topics(
             skipped=True,
             config=config,
         )
+    docs = [conversation_document(record) for record in records]
+    stored_embeddings: np.ndarray | None = None
+    from playbook import runtime as rt
+
+    if rt.vectors is not None:
+        task_ids = [record.conversation_id for record in records]
+        ordered, matrix = rt.vectors.task_matrix(task_ids)
+        if len(ordered) == len(task_ids):
+            stored_embeddings = matrix
     fitted = fit_topic_model(
-        [conversation_document(record) for record in records],
+        docs,
         config,
         embedding_model=embedding_model,
+        embeddings=stored_embeddings,
     )
     return _summarize_topics(
         [record.conversation_id for record in records],

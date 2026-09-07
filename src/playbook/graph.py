@@ -33,6 +33,7 @@ from playbook.scoring import (
 )
 from playbook.store import now_iso
 from playbook.topics import discover_intent_topics, discover_subflow_topics
+from playbook.vectors import upsert_playbook_change
 from playbook.tools import (
     draft_guideline_stub,
     draft_kb_stub,
@@ -149,6 +150,22 @@ def _merge_retrieved_guidance(
     retrieved = list(state.get("retrieved_guidance") or [])
     retrieved.extend(_retrieve_for_topics(topics))
     return retrieved
+
+
+def _sync_kb_vectors_after_persist(
+    *,
+    intent_ids: list[str] | None = None,
+    subflow_pairs: list[tuple[str, str]] | None = None,
+) -> None:
+    if runtime.vectors is None or runtime.embed_fn is None or runtime.playbook is None:
+        return
+    upsert_playbook_change(
+        runtime.vectors,
+        runtime.playbook,
+        runtime.embed_fn,
+        intent_ids=intent_ids,
+        subflow_pairs=subflow_pairs,
+    )
 
 
 def run_config(state: MetaAgentState, *, agent: str) -> dict[str, Any]:
@@ -839,6 +856,7 @@ def intent_discovery_persist_kb(state: MetaAgentState) -> dict[str, Any]:
         runtime.store.log_kb_change(version, "add_intent", {"intent": proposal["candidate"], "tasks": evidence_ids})
         runtime.store.mark_proposal_kb_version(proposal["proposal_id"], version)
         runtime.store.set_run_kb_version(state["run_id"], version)
+        _sync_kb_vectors_after_persist(intent_ids=[proposal["candidate"]])
         approved.append(proposal["proposal_id"])
     return {
         "current_stage": "persist_accepted_intents",
@@ -1039,6 +1057,10 @@ def subflow_discovery_persist_kb(state: MetaAgentState) -> dict[str, Any]:
         )
         runtime.store.mark_proposal_kb_version(proposal["proposal_id"], version)
         runtime.store.set_run_kb_version(state["run_id"], version)
+        _sync_kb_vectors_after_persist(
+            intent_ids=[proposal["parent_intent"]],
+            subflow_pairs=[(proposal["parent_intent"], proposal["candidate"])],
+        )
         approved.append(proposal["proposal_id"])
     return {
         "current_stage": "persist_accepted_subflows",
@@ -1206,6 +1228,9 @@ def pathway_persist(state: MetaAgentState) -> dict[str, Any]:
         )
         runtime.store.log_kb_change(version, "attach_guideline", {"subflow": subflow_id})
         runtime.store.set_run_kb_version(state["run_id"], version)
+        _sync_kb_vectors_after_persist(
+            subflow_pairs=[(payload["intent_id"], subflow_id)],
+        )
     runtime.store.set_staging(state["run_id"], f"pathway:{subflow_id}:rec_id", rec_id)
     return {"current_stage": "persist_pathway", "kb_version": runtime.playbook.version}
 

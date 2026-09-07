@@ -216,8 +216,31 @@ def retrieve_guidance(
     *,
     top_k: int = 4,
 ) -> list[dict[str, Any]]:
-    """Rank current playbook intents by Jaccard against query text."""
+    """Rank playbook intents by cosine similarity to query (vector store when configured)."""
     kb = _live_playbook(playbook)
+    from playbook import runtime as rt
+
+    if rt.vectors is not None and rt.embed_fn is not None and query.strip():
+        from playbook.vectors import KB_KIND_INTENT
+
+        query_vec = rt.embed_fn([query])[0]
+        hits: list[dict[str, Any]] = []
+        for intent_id, score, doc in rt.vectors.query_kb(
+            KB_KIND_INTENT,
+            query_vec,
+            top_k=top_k,
+            doc_ids=kb.intent_ids(),
+        ):
+            hits.append(
+                {
+                    "intent_id": intent_id,
+                    "score": score,
+                    "doc": doc,
+                    "subflows": kb.subflows_for(intent_id),
+                }
+            )
+        return hits
+
     ranked = []
     for intent_id in kb.intent_ids():
         doc = kb.intent_doc(intent_id)

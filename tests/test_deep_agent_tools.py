@@ -24,18 +24,6 @@ DEMO_TOPIC_CONFIG = BertopicConfig(
 )
 
 
-@pytest.fixture
-def runtime(tmp_path):
-    from playbook import configure_runtime
-
-    return configure_runtime(
-        data_dir=PLACEHOLDER_DATA_DIR,
-        store_path=tmp_path / "run_store.sqlite",
-        method="jaccard",
-        topic_config=DEMO_TOPIC_CONFIG,
-    )
-
-
 def test_get_staging_miss_returns_none(runtime):
     from playbook import runtime as rt
 
@@ -180,8 +168,17 @@ def test_retrieve_guidance_tool_catalog_and_query(runtime):
     assert "has_pathway" in catalog["intents"][0]["subflows"][0]
     assert "guidance" not in catalog["intents"][0]
 
-    with_guide = retrieve_guidance.invoke({"include_guidance": True})
-    assert "guidance" in with_guide["intents"][0]
+    with_guide = retrieve_guidance.invoke(
+        {
+            "query": "account access username password",
+            "include_guidance": True,
+            "top_k": 1,
+        }
+    )
+    assert with_guide["hits"]
+    assert with_guide["hits"][0]["intent_id"] == "account_access"
+    if not with_guide.get("truncated"):
+        assert "guidance" in with_guide["hits"][0]
     assert "hidden_flow" not in json.dumps(with_guide)
 
     ranked = retrieve_guidance.invoke({"query": "password reset two-factor"})
