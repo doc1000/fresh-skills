@@ -12,9 +12,10 @@ wheels/
 .env
 
 # Local demo stores
-scratch_data/*.sqlite
-scratch_data/*.sqlite-journal
-scratch_data/eda/
+.streamlit/secrets.toml
+scratch_data/**/*.sqlite*
+scratch_data/**/*.duckdb
+
 
 # ABCD raw dump (regenerate with scripts/download_abcd.py)
 data/raw/*.json

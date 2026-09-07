@@ -1,0 +1,35 @@
+{
+  "intents": {
+    "flows": [
+      "account_access",
+      "order_issue"
+    ],
+    "subflows": {
+      "account_access": [
+        "recover_username",
+        "recover_password",
+        "reset_2fa"
+      ],
+      "order_issue": [
+        "status_mystery_fee",
+        "status_delivery_time",
+        "manage_upgrade",
+        "manage_cancel"
+      ]
+    }
+  },
+  "flow_titles": {
+    "account_access": "Account Access",
+    "order_issue": "Order Issue"
+  },
+  "subflow_titles": {
+    "recover_username": "Recover Username",
+    "recover_password": "Recover Password",
+    "reset_2fa": "Reset Two-Factor Auth",
+    "status_mystery_fee": "Status Mystery Fee",
+    "status_delivery_time": "Status Delivery Time",
+    "manage_upgrade": "Manage Upgrade",
+    "manage_cancel": "Manage Cancel"
+  },
+  "notes": "Filled from ABCD for the current notebook levers. Not a hidden default."
+}

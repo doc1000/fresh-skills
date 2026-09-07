@@ -1,0 +1,321 @@
+{
+  "Account Access": {
+    "description": "username, password, and two-factor authentication",
+    "subflows": {
+      "Recover Username": {
+        "actions": [
+          {
+            "type": "interaction",
+            "button": "Pull up Account",
+            "text": "Ask the customer for their Full name or Account ID with [Pull up Account].   This loads information in the background related to this user.",
+            "subtext": []
+          },
+          {
+            "type": "kb query",
+            "button": "Verify Identity",
+            "text": "Ask the customer for 3 out of 4 items below and use the [Verify Identity] button",
+            "subtext": [
+              "Full name - first and last",
+              "Zip Code",
+              "Phone number",
+              "Email Address"
+            ]
+          },
+          {
+            "type": "communication",
+            "button": "N/A",
+            "text": "You make up their username with the first letter of their first name, their last name with a 1",
+            "subtext": [
+              "For example: John Smith \u2192 jsmith1",
+              "For example: Wendy Chesterfield \u2192 wchesterfield1",
+              "If you are here as part of [Validate Purchase] action or some external flow assume this new username is correct even if the system says it is not valid, and just continue forward with the conversation"
+            ]
+          }
+        ],
+        "instructions": [
+          "To get their username, you must",
+          "That\u2019s it. This flow is very short and often occurs in conjunction with other flows."
+        ]
+      },
+      "Recover Password": {
+        "actions": [
+          {
+            "type": "interaction",
+            "button": "Pull up Account",
+            "text": "Get Full Name or Account ID for [Pull up Account]",
+            "subtext": []
+          },
+          {
+            "type": "interaction",
+            "button": "Enter Details",
+            "text": "Get the customer\u2019s username to check their identity",
+            "subtext": [
+              "If they don\u2019t have their username, then follow the 'Recover Username' flow above",
+              "Once you have it, enter the username and click on [Enter Details]"
+            ]
+          },
+          {
+            "type": "communication",
+            "button": "N/A",
+            "text": "Tell the customer you cannot get their password, but you can generate a new one for them.",
+            "subtext": []
+          },
+          {
+            "type": "kb query",
+            "button": "Make Password",
+            "text": "To operate the [Make Password] action, you will first need:",
+            "subtext": [
+              "Pin Number <or> answer to the Security Question",
+              "Enter either value into the box and then click the [Make Password] button"
+            ]
+          }
+        ],
+        "instructions": [
+          "Help the customer get a new password",
+          "Share the password with the customer."
+        ]
+      },
+      "Reset Two-Factor Auth": {
+        "actions": [
+          {
+            "type": "interaction",
+            "button": "Pull up Account",
+            "text": "Get Full Name or Account ID for [Pull up Account]",
+            "subtext": []
+          },
+          {
+            "type": "interaction",
+            "button": "Enter Details",
+            "text": "You will need their email address so you can email them the reset code:",
+            "subtext": [
+              "Enter their email address with the [Enter Details] action",
+              "If they don\u2019t have their email address, you can bypass this problem by getting one of the following two items: > Ask for their PIN number > Tell them you are going to ask the security question, which is 'What is your mother\u2019s maiden name?'",
+              "Then submit that value into the [Enter Details] form instead.  Tell them that you will send the reset code to the email address saved on file.  Feel free to make up an email address if the customer asks for it."
+            ]
+          },
+          {
+            "type": "interaction",
+            "button": "Send Link",
+            "text": "Inform the customer that to be safe, they should also follow best practices for security.",
+            "subtext": [
+              "Tell them you will send a link about security best practices",
+              "Then click the [Send Link] button, you do not need to enter anything into the form"
+            ]
+          }
+        ],
+        "instructions": [
+          "Let the customer know that to reset, you will be sending a special code to their email.  To proceed:",
+          "If the customer does not seem satisfied, then mark the conversation as not successful when filling out the survey."
+        ]
+      }
+    }
+  },
+  "Order Issue": {
+    "description": "get status of an order or change an order, possibly shipping",
+    "subflows": {
+      "Status Mystery Fee": {
+        "actions": [
+          {
+            "type": "interaction",
+            "button": "Pull up Account",
+            "text": "Get Full Name or Account ID for [Pull up Account]",
+            "subtext": []
+          },
+          {
+            "type": "kb query",
+            "button": "Verify Identity",
+            "text": "Start by looking up the order using the [Verify Identity] fields.",
+            "subtext": [
+              "Full name - may have gotten this earlier",
+              "Account ID - may have gotten this earlier",
+              "Order ID"
+            ]
+          },
+          {
+            "type": "kb query",
+            "button": "Ask the Oracle",
+            "text": "To decide whether or not this is a valid error:",
+            "subtext": [
+              "Check if the company made error by 'Asking the Oracle' which will return Yes or No",
+              "If this was a company mistake (Oracle says Yes), skip the next step",
+              "Make sure to explain the result in natural language."
+            ]
+          },
+          {
+            "type": "faq/policy",
+            "button": "Membership Privileges",
+            "text": "If Oracle Says No, this means the customer possibly made an error",
+            "subtext": [
+              "Ask the customer for their membership level and enter into [Membership Privileges]",
+              "If Gold or Silver: > We trust our gold and silver members.  Thus, they will always get their extra fees removed.  Go to next step.",
+              "If Guest or Bronze: > Then this is a customer error, and the extra fee stays. You cannot do anything > Apologize for the issue and [End Conversation]"
+            ]
+          },
+          {
+            "type": "interaction",
+            "button": "Update Order",
+            "text": "Offer to remove fee (only for Gold or Silver member)",
+            "subtext": [
+              "Confirm the amount that the customer felt was overcharged",
+              "Enter this value (without dollar sign) and select [Update Order]"
+            ]
+          }
+        ],
+        "instructions": [
+          "The customer believes an extra charge has been added to their order.",
+          "If the fee cannot be removed, then apologize to the customer.  Make up some reason why the price was high (i.e. there was a price surge at that time), and remember to mark the conversation as complete, but not successful in the survey."
+        ]
+      },
+      "Status Delivery Time": {
+        "actions": [
+          {
+            "type": "interaction",
+            "button": "Pull up Account",
+            "text": "Get Full Name or Account ID for [Pull up Account]",
+            "subtext": []
+          },
+          {
+            "type": "kb query",
+            "button": "Verify Identity",
+            "text": "Start by looking up the order using the [Verify Identity] fields.",
+            "subtext": [
+              "Full name - may have gotten this earlier",
+              "Account ID - may have gotten this earlier",
+              "Order ID"
+            ]
+          },
+          {
+            "type": "kb query",
+            "button": "Ask the Oracle",
+            "text": "To decide whether or not this is a valid error:",
+            "subtext": [
+              "Check if the company made error by 'Asking the Oracle' which will return Yes or No",
+              "If this was a company mistake (Oracle says Yes), skip the next step",
+              "Make sure to explain the result in natural language."
+            ]
+          },
+          {
+            "type": "interaction",
+            "button": "Shipping Status",
+            "text": "If Oracle Says No, this means the customer possibly made an error",
+            "subtext": []
+          },
+          {
+            "type": "interaction",
+            "button": "Update Order",
+            "text": "x",
+            "subtext": []
+          }
+        ],
+        "instructions": [
+          "The customer believes the delivery time is wrong and wants to move from morning to evening.  If the customer is just confirming a date, then the flow might be Shipping Issue > Status instead.",
+          "If the delivery cannot be changed, then apologize to the customer and remember to mark the conversation as complete, but not successful in the survey."
+        ]
+      },
+      "Manage Upgrade": {
+        "actions": [
+          {
+            "type": "interaction",
+            "button": "Pull up Account",
+            "text": "Get Full Name or Account ID for [Pull up Account]",
+            "subtext": []
+          },
+          {
+            "type": "kb query",
+            "button": "Verify Identity",
+            "text": "Start by looking up the order using the [Verify Identity] fields.",
+            "subtext": [
+              "Full name - may have gotten this earlier",
+              "Account ID - may have gotten this earlier",
+              "Order ID"
+            ]
+          },
+          {
+            "type": "interaction",
+            "button": "Shipping Status",
+            "text": "Find out whether the item has already shipped.",
+            "subtext": [
+              "Ask for the shipping status from customer, and enter into [Shipping Status] > Possible options: ['Order Received', 'In Transit', 'Out for Delivery', 'Delivered']",
+              "If the item is 'Order Received' > Then the company has received the order, but the item has not yet shipped > Move onto the next step",
+              "If the item is 'In Transit', 'Out for Delivery', or 'Delivered' then it is too late > The item has already shipped and the date cannot be altered > However, this means the item will likely arrive today or tomorrow anyway > Explain this to the customer and [End Conversation]"
+            ]
+          },
+          {
+            "type": "faq/policy",
+            "button": "Membership Privileges",
+            "text": "Find out how much the extra fee will be for upgraded overnight shipping",
+            "subtext": [
+              "Ask the customer for their membership level.  Type it into the field and then select the [Membership Privileges] option.",
+              "Gold members: > Gold members have their fee waived",
+              "Guest, Bronze or Silver members: > Ask them if they can charge $20 to the credit card on their account > The answer should be yes, since that is the only way to pay"
+            ]
+          },
+          {
+            "type": "interaction",
+            "button": "Update Order",
+            "text": "Finally, you want to upgrade their shipping time.",
+            "subtext": [
+              "Enter 'tomorrow' and then select [Update Order]"
+            ]
+          }
+        ],
+        "instructions": [
+          "The customer wants to upgrade to overnight shipping.",
+          "If the shipping date cannot be changed, then apologize to the customer and remember to mark the conversation as complete, but not successful in the survey."
+        ]
+      },
+      "Manage Cancel": {
+        "actions": [
+          {
+            "type": "interaction",
+            "button": "Pull up Account",
+            "text": "Get Full Name or Account ID for [Pull up Account]",
+            "subtext": []
+          },
+          {
+            "type": "kb query",
+            "button": "Verify Identity",
+            "text": "Start by looking up the order using the [Verify Identity] fields.",
+            "subtext": [
+              "Full name - may have gotten this earlier",
+              "Account ID - may have gotten this earlier",
+              "Order ID"
+            ]
+          },
+          {
+            "type": "interaction",
+            "button": "Shipping Status",
+            "text": "Find out whether the item has already shipped.",
+            "subtext": [
+              "Ask customer for the shipping status and then submit using [Shipping Status]",
+              "If the item is Order Received, then immediately offer the refund and tell the customer the unwanted item has been removed from their order.",
+              "If the item is 'In Transit', 'Out for Delivery' or 'Delivered' then check their membership level (next step)."
+            ]
+          },
+          {
+            "type": "faq/policy",
+            "button": "Membership Privileges",
+            "text": "Ask the customer for their membership level.",
+            "subtext": [
+              "If they are bronze, silver or gold: > Enter Gold or Silver, depending on the level into the text box > Click the [Membership Privileges] option > Tell them you can offer a refund immediately.  After the item arrives, the customer should then call back to customer support to get the shipping label for return.",
+              "If they are a Guest customer, then they must wait until the item arrives and call back to customer support to start the return process. [End Conversation] after communicating the above."
+            ]
+          },
+          {
+            "type": "interaction",
+            "button": "Offer Refund",
+            "text": "Find out how much the item cost that is meant to be returned",
+            "subtext": [
+              "Enter the amount in the box",
+              "Select the [Offer Refund] option"
+            ]
+          }
+        ],
+        "instructions": [
+          "The customer accidentally ordered two items when they meant to order just one.",
+          "Whether or not the conversation is successful depends on how happy you think the customer ended up. There is no right or wrong answer, just make your best judgement."
+        ]
+      }
+    }
+  }
+}

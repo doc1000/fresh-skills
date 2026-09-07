@@ -1,0 +1,9 @@
+[server]
+# The module watcher walks every import in sys.modules, which trips the lazy
+# attribute loaders in `transformers` (torchvision, image processing) that this
+# project never uses. Set to "auto" while editing the app; the tracebacks are
+# noise, not failures.
+fileWatcherType = "none"
+
+[browser]
+gatherUsageStats = false

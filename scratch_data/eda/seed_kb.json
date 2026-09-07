@@ -1,0 +1,44 @@
+{
+  "recover_username": [
+    "pull-up-account",
+    "verify-identity"
+  ],
+  "recover_password": [
+    "pull-up-account",
+    "enter-details",
+    "make-password"
+  ],
+  "reset_2fa": [
+    "pull-up-account",
+    "enter-details",
+    "send-link"
+  ],
+  "status_mystery_fee": [
+    "pull-up-account",
+    "verify-identity",
+    "ask-the-oracle",
+    "membership-privileges",
+    "update-order"
+  ],
+  "status_delivery_time": [
+    "pull-up-account",
+    "verify-identity",
+    "ask-the-oracle",
+    "shipping-status",
+    "update-order"
+  ],
+  "manage_upgrade": [
+    "pull-up-account",
+    "verify-identity",
+    "shipping-status",
+    "membership-privileges",
+    "update-order"
+  ],
+  "manage_cancel": [
+    "pull-up-account",
+    "verify-identity",
+    "shipping-status",
+    "membership-privileges",
+    "offer-refund"
+  ]
+}

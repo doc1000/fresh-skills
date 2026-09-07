@@ -1,0 +1,1162 @@
+[
+  {
+    "conversation_id": "138",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "recover_username",
+    "opening": "Hi, I can't access my account",
+    "conversation_date": "2026-08-25"
+  },
+  {
+    "conversation_id": "163",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "recover_username",
+    "opening": "I can't access my account",
+    "conversation_date": "2026-08-25"
+  },
+  {
+    "conversation_id": "178",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "recover_username",
+    "opening": "My name is David Williams, and I have an order that I need to check, but I can't",
+    "conversation_date": "2026-08-25"
+  },
+  {
+    "conversation_id": "250",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "recover_username",
+    "opening": "Hi I want to check on an order status on the website, but I can't remember my us",
+    "conversation_date": "2026-08-25"
+  },
+  {
+    "conversation_id": "313",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "recover_username",
+    "opening": "Hello, I wanted to check the status of a recent order I placed and I forgot my u",
+    "conversation_date": "2026-08-26"
+  },
+  {
+    "conversation_id": "375",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "recover_username",
+    "opening": "I need to reset my password",
+    "conversation_date": "2026-08-26"
+  },
+  {
+    "conversation_id": "428",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "recover_username",
+    "opening": "I can't access my account. I'm not sure what my username is.",
+    "conversation_date": "2026-08-26"
+  },
+  {
+    "conversation_id": "442",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "recover_username",
+    "opening": "Hi,  I am having trouble logging in",
+    "conversation_date": "2026-08-26"
+  },
+  {
+    "conversation_id": "532",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "recover_username",
+    "opening": "I am trying to check the status of my order but I have forgotten what my usernam",
+    "conversation_date": "2026-08-26"
+  },
+  {
+    "conversation_id": "552",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "recover_username",
+    "opening": "i want to check my order status but I forgot my username",
+    "conversation_date": "2026-08-26"
+  },
+  {
+    "conversation_id": "562",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "recover_username",
+    "opening": "Hello, i am trying to access my account to check on an order but i have forgotte",
+    "conversation_date": "2026-08-26"
+  },
+  {
+    "conversation_id": "577",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "recover_username",
+    "opening": "Hi, I placed an order recently but I have forgotten my username and can't get ba",
+    "conversation_date": "2026-08-27"
+  },
+  {
+    "conversation_id": "598",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "recover_username",
+    "opening": "Hi I forgot my username and would like to get back into my account",
+    "conversation_date": "2026-08-27"
+  },
+  {
+    "conversation_id": "712",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "recover_username",
+    "opening": "Yes, I am trying to access my account online but I can't remember my username.",
+    "conversation_date": "2026-08-27"
+  },
+  {
+    "conversation_id": "858",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "recover_username",
+    "opening": "I would like to view my shopping history but forgot my user name?",
+    "conversation_date": "2026-08-27"
+  },
+  {
+    "conversation_id": "143",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "recover_password",
+    "opening": "HELLO FRIEND ARE YOU HERE?",
+    "conversation_date": "2026-08-27"
+  },
+  {
+    "conversation_id": "198",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "recover_password",
+    "opening": "I'm Crystal Minh and I need to go through the password recovery process.",
+    "conversation_date": "2026-08-27"
+  },
+  {
+    "conversation_id": "249",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "recover_password",
+    "opening": "Hi, I can't log into my account",
+    "conversation_date": "2026-08-27"
+  },
+  {
+    "conversation_id": "377",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "recover_password",
+    "opening": "I need to be able to view my shopping history online. I cant access my account b",
+    "conversation_date": "2026-08-27"
+  },
+  {
+    "conversation_id": "401",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "recover_password",
+    "opening": "I am trying to access my shopping history but I can't remember my password",
+    "conversation_date": "2026-08-28"
+  },
+  {
+    "conversation_id": "411",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "recover_password",
+    "opening": "I have an unusual situation, I want to order something but I cannot my account. ",
+    "conversation_date": "2026-08-28"
+  },
+  {
+    "conversation_id": "516",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "recover_password",
+    "opening": "Hello, I do not have my password and can't get into account",
+    "conversation_date": "2026-08-28"
+  },
+  {
+    "conversation_id": "538",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "recover_password",
+    "opening": "Hi. I was trying to check my account for information on an order and I cannot ac",
+    "conversation_date": "2026-08-28"
+  },
+  {
+    "conversation_id": "554",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "recover_password",
+    "opening": "Hi I need help accessing my account",
+    "conversation_date": "2026-08-28"
+  },
+  {
+    "conversation_id": "582",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "recover_password",
+    "opening": "Hi I'm having trouble accessing my account, I forgot my password. Can you help m",
+    "conversation_date": "2026-08-28"
+  },
+  {
+    "conversation_id": "751",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "recover_password",
+    "opening": "Hi. I've been trying to log in to my account all day, but I forgot my password",
+    "conversation_date": "2026-08-28"
+  },
+  {
+    "conversation_id": "831",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "recover_password",
+    "opening": "Hi I'm trying to check on my order's status.",
+    "conversation_date": "2026-08-29"
+  },
+  {
+    "conversation_id": "874",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "recover_password",
+    "opening": "I am trying to see my shopping history online, but I can't remember my password.",
+    "conversation_date": "2026-08-29"
+  },
+  {
+    "conversation_id": "902",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "recover_password",
+    "opening": "Yeah, I was having an excellent afternoon browsing your site and I got logged ou",
+    "conversation_date": "2026-08-29"
+  },
+  {
+    "conversation_id": "933",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "recover_password",
+    "opening": "Hi I was trying to log into my account to look into an order status but I forgot",
+    "conversation_date": "2026-08-29"
+  },
+  {
+    "conversation_id": "113",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "reset_2fa",
+    "opening": "Hi, it seems i cannot get into my account because i lost my phone i was using fo",
+    "conversation_date": "2026-08-29"
+  },
+  {
+    "conversation_id": "195",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "reset_2fa",
+    "opening": "I am trying to sign into my account but I don't have my phone needed for 2FA",
+    "conversation_date": "2026-08-29"
+  },
+  {
+    "conversation_id": "290",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "reset_2fa",
+    "opening": "Hello.  My name is David Williams.  I am writing because I need my 2 factor auth",
+    "conversation_date": "2026-08-29"
+  },
+  {
+    "conversation_id": "297",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "reset_2fa",
+    "opening": "Hello. I want to look at an order I placed, but I've lost my phone I used to acc",
+    "conversation_date": "2026-08-30"
+  },
+  {
+    "conversation_id": "437",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "reset_2fa",
+    "opening": "Hi, I use my phone for two-factor authentication, but I've lost my phone so I ca",
+    "conversation_date": "2026-08-30"
+  },
+  {
+    "conversation_id": "451",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "reset_2fa",
+    "opening": "hi, i lost my phone so i cannot get into my account anymore",
+    "conversation_date": "2026-08-30"
+  },
+  {
+    "conversation_id": "467",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "reset_2fa",
+    "opening": "Hi there! I need to check my account to get more information on an order I place",
+    "conversation_date": "2026-08-30"
+  },
+  {
+    "conversation_id": "501",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "reset_2fa",
+    "opening": "Hello. I cannot seem to log in to see my online shopping history. I have lost th",
+    "conversation_date": "2026-08-30"
+  },
+  {
+    "conversation_id": "514",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "reset_2fa",
+    "opening": "Hello, I recently placed an order and want to check the status, but I lost my ph",
+    "conversation_date": "2026-08-30"
+  },
+  {
+    "conversation_id": "597",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "reset_2fa",
+    "opening": "Hi, I need to log on and check order status, I lost my phone, my cell, I use for",
+    "conversation_date": "2026-08-30"
+  },
+  {
+    "conversation_id": "637",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "reset_2fa",
+    "opening": "Hi, I can't get into my account. I lost my phone for my 2 factor. Can you help m",
+    "conversation_date": "2026-08-31"
+  },
+  {
+    "conversation_id": "661",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "reset_2fa",
+    "opening": "Hello. I am a Bronze member my name is Chloe Zhang, and I am looking to get an e",
+    "conversation_date": "2026-08-31"
+  },
+  {
+    "conversation_id": "723",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "reset_2fa",
+    "opening": "I would like to check on my order status but i cannot access my account because ",
+    "conversation_date": "2026-08-31"
+  },
+  {
+    "conversation_id": "749",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "reset_2fa",
+    "opening": "Hello james, i recently lost my phone and need to figure out how i can fix my ac",
+    "conversation_date": "2026-08-31"
+  },
+  {
+    "conversation_id": "794",
+    "role": "seed",
+    "true_flow": "account_access",
+    "true_subflow": "reset_2fa",
+    "opening": "Hi! I am having trouble accessing my account",
+    "conversation_date": "2026-08-31"
+  },
+  {
+    "conversation_id": "300",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "status_mystery_fee",
+    "opening": "Hi!  I want to check the status of my order.  It looks like there is an extra fe",
+    "conversation_date": "2026-08-31"
+  },
+  {
+    "conversation_id": "414",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "status_mystery_fee",
+    "opening": "Yes, I need help with my order. There seems to be a charge that I have no idea w",
+    "conversation_date": "2026-08-31"
+  },
+  {
+    "conversation_id": "541",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "status_mystery_fee",
+    "opening": "Hi, I want to check the status of my order with the Order ID 9441562136?",
+    "conversation_date": "2026-09-01"
+  },
+  {
+    "conversation_id": "549",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "status_mystery_fee",
+    "opening": "I\u2019d like to check my order.",
+    "conversation_date": "2026-09-01"
+  },
+  {
+    "conversation_id": "1232",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "status_mystery_fee",
+    "opening": "Hello, There is a extra fee on my order",
+    "conversation_date": "2026-09-01"
+  },
+  {
+    "conversation_id": "1265",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "status_mystery_fee",
+    "opening": "Hi! I bought a Guess Shirt from the store yesterday but I notice there is an ext",
+    "conversation_date": "2026-09-01"
+  },
+  {
+    "conversation_id": "1303",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "status_mystery_fee",
+    "opening": "Hi! I wanted to check the status of my order",
+    "conversation_date": "2026-09-01"
+  },
+  {
+    "conversation_id": "1336",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "status_mystery_fee",
+    "opening": "I have a question about a recent order",
+    "conversation_date": "2026-09-01"
+  },
+  {
+    "conversation_id": "1593",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "status_mystery_fee",
+    "opening": "Hi there, my name is Sanya Afzal and I have a concern about my purchase with you",
+    "conversation_date": "2026-09-01"
+  },
+  {
+    "conversation_id": "1649",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "status_mystery_fee",
+    "opening": "Hi! I ordered CK boots last night but I noticed there is an extra fee added to m",
+    "conversation_date": "2026-09-02"
+  },
+  {
+    "conversation_id": "1741",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "status_mystery_fee",
+    "opening": "Hi! I wanted to check the status of my order. I see that there is some extra fee",
+    "conversation_date": "2026-09-02"
+  },
+  {
+    "conversation_id": "1937",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "status_mystery_fee",
+    "opening": "Hi I have a question about a recent order",
+    "conversation_date": "2026-09-02"
+  },
+  {
+    "conversation_id": "2037",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "status_mystery_fee",
+    "opening": "Yes, I was looking at my account and there seems to be an additional charge adde",
+    "conversation_date": "2026-09-02"
+  },
+  {
+    "conversation_id": "2119",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "status_mystery_fee",
+    "opening": "I have an extra fee added to my order, and I want to check to see why.",
+    "conversation_date": "2026-09-02"
+  },
+  {
+    "conversation_id": "2130",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "status_mystery_fee",
+    "opening": "Could you tell me my order status of something I ordered. I think I was charged ",
+    "conversation_date": "2026-09-02"
+  },
+  {
+    "conversation_id": "455",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "status_delivery_time",
+    "opening": "Yes, I need to check on my order. I noticed that the delivery time is incorrect,",
+    "conversation_date": "2026-09-02"
+  },
+  {
+    "conversation_id": "482",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "status_delivery_time",
+    "opening": "hi...I'd like to check the status of my order 9269399258 because I  need to chan",
+    "conversation_date": "2026-09-02"
+  },
+  {
+    "conversation_id": "575",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "status_delivery_time",
+    "opening": "Hello, I would like to look into changing the delivery time of my order.",
+    "conversation_date": "2026-09-03"
+  },
+  {
+    "conversation_id": "666",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "status_delivery_time",
+    "opening": "Hi, name is Joyce Wu. I have an issue with delivery time on an order.",
+    "conversation_date": "2026-09-03"
+  },
+  {
+    "conversation_id": "692",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "status_delivery_time",
+    "opening": "Hi, I didn't receive my delivery yet.",
+    "conversation_date": "2026-09-03"
+  },
+  {
+    "conversation_id": "766",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "status_delivery_time",
+    "opening": "The delivery time of my order is wrong. It must be changed.",
+    "conversation_date": "2026-09-03"
+  },
+  {
+    "conversation_id": "785",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "status_delivery_time",
+    "opening": "I need to check the status of my order. I also want to change the delivery time.",
+    "conversation_date": "2026-09-03"
+  },
+  {
+    "conversation_id": "812",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "status_delivery_time",
+    "opening": "I would like to check the status of my order",
+    "conversation_date": "2026-09-03"
+  },
+  {
+    "conversation_id": "912",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "status_delivery_time",
+    "opening": "Hi! i want to check the status of my order so i can update the delivery time .",
+    "conversation_date": "2026-09-03"
+  },
+  {
+    "conversation_id": "919",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "status_delivery_time",
+    "opening": "Hello, I would like to check that status of my order because the delivery time i",
+    "conversation_date": "2026-09-04"
+  },
+  {
+    "conversation_id": "1067",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "status_delivery_time",
+    "opening": "Hi. I needed some help. I want to check the status of my order. I need the deliv",
+    "conversation_date": "2026-09-04"
+  },
+  {
+    "conversation_id": "1074",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "status_delivery_time",
+    "opening": "Hi I am going on vacation and will not be home to accept my package. I need to c",
+    "conversation_date": "2026-09-04"
+  },
+  {
+    "conversation_id": "1092",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "status_delivery_time",
+    "opening": "Hi, I don't think the delivery time estimate that I was given is correct and I'd",
+    "conversation_date": "2026-09-04"
+  },
+  {
+    "conversation_id": "1152",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "status_delivery_time",
+    "opening": "Yes, I would like to check the status of my order. The delivery time is incorrec",
+    "conversation_date": "2026-09-04"
+  },
+  {
+    "conversation_id": "1156",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "status_delivery_time",
+    "opening": "Hi, I'd like to check the status of my order",
+    "conversation_date": "2026-09-04"
+  },
+  {
+    "conversation_id": "190",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "manage_upgrade",
+    "opening": "Hello!  My name is Sanya Afzal.  Who am I speaking with today?",
+    "conversation_date": "2026-09-04"
+  },
+  {
+    "conversation_id": "266",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "manage_upgrade",
+    "opening": "Hello I would like to change a regular shipping speed to overnight",
+    "conversation_date": "2026-09-05"
+  },
+  {
+    "conversation_id": "278",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "manage_upgrade",
+    "opening": "I need this Order  delivered ASAP, I have an event to attend in which I will nee",
+    "conversation_date": "2026-09-05"
+  },
+  {
+    "conversation_id": "362",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "manage_upgrade",
+    "opening": "Hi, I want to upgrade to overnight shipping",
+    "conversation_date": "2026-09-05"
+  },
+  {
+    "conversation_id": "416",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "manage_upgrade",
+    "opening": "Hello, I would like to upgrade my shipping option.",
+    "conversation_date": "2026-09-05"
+  },
+  {
+    "conversation_id": "448",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "manage_upgrade",
+    "opening": "Hi, I ordered some jeans and I want to change the shipping to overnight. Can you",
+    "conversation_date": "2026-09-05"
+  },
+  {
+    "conversation_id": "487",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "manage_upgrade",
+    "opening": "Hello I'd like to upgrade my shipping",
+    "conversation_date": "2026-09-05"
+  },
+  {
+    "conversation_id": "643",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "manage_upgrade",
+    "opening": "Hello, I would like to upgrade to overnight shipping for my order because I want",
+    "conversation_date": "2026-09-05"
+  },
+  {
+    "conversation_id": "753",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "manage_upgrade",
+    "opening": "I am wondering if I can upgrade to overnight shipping on my order. I really need",
+    "conversation_date": "2026-09-06"
+  },
+  {
+    "conversation_id": "757",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "manage_upgrade",
+    "opening": "I want to confirm whether my package is in transit",
+    "conversation_date": "2026-09-06"
+  },
+  {
+    "conversation_id": "878",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "manage_upgrade",
+    "opening": "Hi. I'd like to see if I can speed up the shipping on an order.",
+    "conversation_date": "2026-09-06"
+  },
+  {
+    "conversation_id": "903",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "manage_upgrade",
+    "opening": "Hi! I would like to upgrade to overnight shipping to expedite the shipping proce",
+    "conversation_date": "2026-09-06"
+  },
+  {
+    "conversation_id": "1035",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "manage_upgrade",
+    "opening": "Hi, I want to upgrade my shipping method for my last order to overnight.",
+    "conversation_date": "2026-09-06"
+  },
+  {
+    "conversation_id": "1054",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "manage_upgrade",
+    "opening": "Hello - I would like upgrade my order to overnight shipping because I need my or",
+    "conversation_date": "2026-09-06"
+  },
+  {
+    "conversation_id": "1131",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "manage_upgrade",
+    "opening": "Hi, I would like to upgrade my shipping to overnight",
+    "conversation_date": "2026-09-06"
+  },
+  {
+    "conversation_id": "306",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "manage_cancel",
+    "opening": "Hi, I recently received my order and my husband doesn't like the jeans, so I wan",
+    "conversation_date": "2026-09-06"
+  },
+  {
+    "conversation_id": "511",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "manage_cancel",
+    "opening": "Hi, I'm trying to figure out a way to remove the $64 hilfiger shirt from my orde",
+    "conversation_date": "2026-09-07"
+  },
+  {
+    "conversation_id": "606",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "manage_cancel",
+    "opening": "I want to get rid of the second item from order. I accidentally chose the wrong ",
+    "conversation_date": "2026-09-07"
+  },
+  {
+    "conversation_id": "780",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "manage_cancel",
+    "opening": "Hi.  My name is David Williams.  I would like to remove the second item from my ",
+    "conversation_date": "2026-09-07"
+  },
+  {
+    "conversation_id": "1148",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "manage_cancel",
+    "opening": "I accidently chose the wrong size on my Tommy Hilfiger shirt. Can I remove that ",
+    "conversation_date": "2026-09-07"
+  },
+  {
+    "conversation_id": "1223",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "manage_cancel",
+    "opening": "Hi, I'm having trouble removing an item from my order.",
+    "conversation_date": "2026-09-07"
+  },
+  {
+    "conversation_id": "1333",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "manage_cancel",
+    "opening": "Hi, I need to cancel part of my order",
+    "conversation_date": "2026-09-07"
+  },
+  {
+    "conversation_id": "1361",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "manage_cancel",
+    "opening": "Hi! I need some help with a purchase I made",
+    "conversation_date": "2026-09-07"
+  },
+  {
+    "conversation_id": "1400",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "manage_cancel",
+    "opening": "Hi, I placed an order and I want to remove an item",
+    "conversation_date": "2026-09-08"
+  },
+  {
+    "conversation_id": "1411",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "manage_cancel",
+    "opening": "Hi, want to remove a second it my order",
+    "conversation_date": "2026-09-08"
+  },
+  {
+    "conversation_id": "1474",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "manage_cancel",
+    "opening": "Hello! :) I messed up my order, and I'm hoping to be able to remove an item from",
+    "conversation_date": "2026-09-08"
+  },
+  {
+    "conversation_id": "1579",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "manage_cancel",
+    "opening": "I need to remove an item from my order.  My husband is being picky lol",
+    "conversation_date": "2026-09-08"
+  },
+  {
+    "conversation_id": "1638",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "manage_cancel",
+    "opening": "Hi, I just placed an order but I need to remove the 2nd thing on my order.",
+    "conversation_date": "2026-09-08"
+  },
+  {
+    "conversation_id": "1772",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "manage_cancel",
+    "opening": "i accidentally added something with the wrong size. Can you help me remove the s",
+    "conversation_date": "2026-09-08"
+  },
+  {
+    "conversation_id": "1785",
+    "role": "seed",
+    "true_flow": "order_issue",
+    "true_subflow": "manage_cancel",
+    "opening": "Hi, I need to remove the second item from my order. I didn't actually mean to or",
+    "conversation_date": "2026-09-08"
+  },
+  {
+    "conversation_id": "159",
+    "role": "noise",
+    "true_flow": "shipping_issue",
+    "true_subflow": "missing",
+    "opening": "I want to check the status of my order",
+    "conversation_date": "2026-09-09"
+  },
+  {
+    "conversation_id": "194",
+    "role": "noise",
+    "true_flow": "shipping_issue",
+    "true_subflow": "cost",
+    "opening": "Hello, I think there was a mistake with the shipping cost on my order, it is way",
+    "conversation_date": "2026-09-09"
+  },
+  {
+    "conversation_id": "165",
+    "role": "noise",
+    "true_flow": "product_defect",
+    "true_subflow": "return_stain",
+    "opening": "Yes. I purchased a Michael Kors shirt from you, but it arrived with a stain. I'd",
+    "conversation_date": "2026-09-09"
+  },
+  {
+    "conversation_id": "222",
+    "role": "noise",
+    "true_flow": "product_defect",
+    "true_subflow": "refund_initiate",
+    "opening": "I ordered this jacket but I've changed my mind and I don't really want it",
+    "conversation_date": "2026-09-09"
+  },
+  {
+    "conversation_id": "239",
+    "role": "noise",
+    "true_flow": "purchase_dispute",
+    "true_subflow": "promo_code_invalid",
+    "opening": "Hi, I am hoping you can help me. I was trying to enter a promo code and I keep g",
+    "conversation_date": "2026-09-09"
+  },
+  {
+    "conversation_id": "181",
+    "role": "noise",
+    "true_flow": "purchase_dispute",
+    "true_subflow": "out_of_stock_general",
+    "opening": "Hello, I keep looking for a few different items but they all seem to be out of s",
+    "conversation_date": "2026-09-09"
+  },
+  {
+    "conversation_id": "122",
+    "role": "noise",
+    "true_flow": "subscription_inquiry",
+    "true_subflow": "manage_pay_bill",
+    "opening": "Hi!  I am interested in renewing my membership today.  Can you help me with that",
+    "conversation_date": "2026-09-09"
+  },
+  {
+    "conversation_id": "140",
+    "role": "noise",
+    "true_flow": "manage_account",
+    "true_subflow": "manage_change_address",
+    "opening": "I must have mistyped my address when I registered.  The street address is wrong.",
+    "conversation_date": "2026-09-10"
+  },
+  {
+    "conversation_id": "279",
+    "role": "noise",
+    "true_flow": "storewide_query",
+    "true_subflow": "pricing_3",
+    "opening": "HI I have purchased one Jacket",
+    "conversation_date": "2026-09-10"
+  },
+  {
+    "conversation_id": "627",
+    "role": "noise",
+    "true_flow": "single_item_query",
+    "true_subflow": "boots_how_2",
+    "opening": "Hello, i would like to know some more about this shoe. Could you tell me the wid",
+    "conversation_date": "2026-09-10"
+  },
+  {
+    "conversation_id": "268",
+    "role": "probe_subflow",
+    "true_flow": "order_issue",
+    "true_subflow": "status_payment_method",
+    "opening": "Hi. My payment method seems to be wrong. I want to check the status of my order.",
+    "conversation_date": "2026-09-10"
+  },
+  {
+    "conversation_id": "316",
+    "role": "probe_subflow",
+    "true_flow": "order_issue",
+    "true_subflow": "status_payment_method",
+    "opening": "Hi there, I think my payment method may be wrong, I'm not totally sure.  Can you",
+    "conversation_date": "2026-09-10"
+  },
+  {
+    "conversation_id": "424",
+    "role": "probe_subflow",
+    "true_flow": "order_issue",
+    "true_subflow": "status_payment_method",
+    "opening": "Hi, I wanted to check on the status for my order.  The payment information seems",
+    "conversation_date": "2026-09-10"
+  },
+  {
+    "conversation_id": "446",
+    "role": "probe_subflow",
+    "true_flow": "order_issue",
+    "true_subflow": "status_payment_method",
+    "opening": "hi, I think I need to change my payment for my order",
+    "conversation_date": "2026-09-10"
+  },
+  {
+    "conversation_id": "572",
+    "role": "probe_subflow",
+    "true_flow": "order_issue",
+    "true_subflow": "status_payment_method",
+    "opening": "I would like to check the status of my order",
+    "conversation_date": "2026-09-11"
+  },
+  {
+    "conversation_id": "679",
+    "role": "probe_subflow",
+    "true_flow": "order_issue",
+    "true_subflow": "status_payment_method",
+    "opening": "I am checking on the status of my order",
+    "conversation_date": "2026-09-11"
+  },
+  {
+    "conversation_id": "893",
+    "role": "probe_subflow",
+    "true_flow": "order_issue",
+    "true_subflow": "status_payment_method",
+    "opening": "I think I messed up on my payment method, can I check the status?",
+    "conversation_date": "2026-09-11"
+  },
+  {
+    "conversation_id": "1103",
+    "role": "probe_subflow",
+    "true_flow": "order_issue",
+    "true_subflow": "status_payment_method",
+    "opening": "I need to check on the status of an order, I am concerned the payment method may",
+    "conversation_date": "2026-09-11"
+  },
+  {
+    "conversation_id": "1125",
+    "role": "probe_subflow",
+    "true_flow": "order_issue",
+    "true_subflow": "status_payment_method",
+    "opening": "HI, I need to change the payment info on my order. Can you assist?",
+    "conversation_date": "2026-09-11"
+  },
+  {
+    "conversation_id": "1416",
+    "role": "probe_subflow",
+    "true_flow": "order_issue",
+    "true_subflow": "status_payment_method",
+    "opening": "Hi, i am a question about the status of my subscription",
+    "conversation_date": "2026-09-11"
+  },
+  {
+    "conversation_id": "1508",
+    "role": "probe_subflow",
+    "true_flow": "order_issue",
+    "true_subflow": "status_payment_method",
+    "opening": "Hi, I think the payment method for my order is wrong",
+    "conversation_date": "2026-09-11"
+  },
+  {
+    "conversation_id": "1671",
+    "role": "probe_subflow",
+    "true_flow": "order_issue",
+    "true_subflow": "status_payment_method",
+    "opening": "I need to check my order.  I entered in my payment information and it said it wa",
+    "conversation_date": "2026-09-12"
+  },
+  {
+    "conversation_id": "1713",
+    "role": "probe_subflow",
+    "true_flow": "order_issue",
+    "true_subflow": "status_payment_method",
+    "opening": "Hi! I need you to check on my order, I don't think I used the right payment meth",
+    "conversation_date": "2026-09-12"
+  },
+  {
+    "conversation_id": "1749",
+    "role": "probe_subflow",
+    "true_flow": "order_issue",
+    "true_subflow": "status_payment_method",
+    "opening": "Hi. I just need to check the status of my order. The payment method is not right",
+    "conversation_date": "2026-09-12"
+  },
+  {
+    "conversation_id": "1890",
+    "role": "probe_subflow",
+    "true_flow": "order_issue",
+    "true_subflow": "status_payment_method",
+    "opening": "can you check the status of my order because the payment method looks to be wron",
+    "conversation_date": "2026-09-12"
+  },
+  {
+    "conversation_id": "110",
+    "role": "probe_intent",
+    "true_flow": "troubleshoot_site",
+    "true_subflow": "slow_speed",
+    "opening": "Hi, My name is joseph Banter. I have been on the site for over a half an hour tr",
+    "conversation_date": "2026-09-12"
+  },
+  {
+    "conversation_id": "131",
+    "role": "probe_intent",
+    "true_flow": "troubleshoot_site",
+    "true_subflow": "slow_speed",
+    "opening": "Hi There, trying to navigate your site however it's running really slow",
+    "conversation_date": "2026-09-12"
+  },
+  {
+    "conversation_id": "152",
+    "role": "probe_intent",
+    "true_flow": "troubleshoot_site",
+    "true_subflow": "slow_speed",
+    "opening": "The site is running really slow.",
+    "conversation_date": "2026-09-12"
+  },
+  {
+    "conversation_id": "186",
+    "role": "probe_intent",
+    "true_flow": "troubleshoot_site",
+    "true_subflow": "slow_speed",
+    "opening": "Hello there, I am running into an issue. The website is running extremely slow, ",
+    "conversation_date": "2026-09-12"
+  },
+  {
+    "conversation_id": "201",
+    "role": "probe_intent",
+    "true_flow": "troubleshoot_site",
+    "true_subflow": "slow_speed",
+    "opening": "Hi there. I'm trying to access the website, but it's going super slow",
+    "conversation_date": "2026-09-13"
+  },
+  {
+    "conversation_id": "230",
+    "role": "probe_intent",
+    "true_flow": "troubleshoot_site",
+    "true_subflow": "slow_speed",
+    "opening": "I am trying to browse the site, but it is slow. Some of the images never load.",
+    "conversation_date": "2026-09-13"
+  },
+  {
+    "conversation_id": "241",
+    "role": "probe_intent",
+    "true_flow": "troubleshoot_site",
+    "true_subflow": "slow_speed",
+    "opening": "Hi. The website is running really slowly.",
+    "conversation_date": "2026-09-13"
+  },
+  {
+    "conversation_id": "244",
+    "role": "probe_intent",
+    "true_flow": "troubleshoot_site",
+    "true_subflow": "slow_speed",
+    "opening": "The website seems to be running really slow  today",
+    "conversation_date": "2026-09-13"
+  },
+  {
+    "conversation_id": "363",
+    "role": "probe_intent",
+    "true_flow": "troubleshoot_site",
+    "true_subflow": "slow_speed",
+    "opening": "The website is so slow today. Do you know what's going on?",
+    "conversation_date": "2026-09-13"
+  },
+  {
+    "conversation_id": "496",
+    "role": "probe_intent",
+    "true_flow": "troubleshoot_site",
+    "true_subflow": "slow_speed",
+    "opening": "The website is really slow and I am trying to wonder why that is? Will this prob",
+    "conversation_date": "2026-09-13"
+  },
+  {
+    "conversation_id": "522",
+    "role": "probe_intent",
+    "true_flow": "troubleshoot_site",
+    "true_subflow": "slow_speed",
+    "opening": "Hi! The website is going very slowly, I was wondering what was up?",
+    "conversation_date": "2026-09-13"
+  },
+  {
+    "conversation_id": "523",
+    "role": "probe_intent",
+    "true_flow": "troubleshoot_site",
+    "true_subflow": "slow_speed",
+    "opening": "Hi there was a problem with my payment on an order",
+    "conversation_date": "2026-09-14"
+  },
+  {
+    "conversation_id": "534",
+    "role": "probe_intent",
+    "true_flow": "troubleshoot_site",
+    "true_subflow": "slow_speed",
+    "opening": "Hi! the website is running really slow and not usable. Can you please help me fi",
+    "conversation_date": "2026-09-14"
+  },
+  {
+    "conversation_id": "537",
+    "role": "probe_intent",
+    "true_flow": "troubleshoot_site",
+    "true_subflow": "slow_speed",
+    "opening": "Hi, I'm just wondering, I can't get to the site, is there a problem with it?",
+    "conversation_date": "2026-09-14"
+  },
+  {
+    "conversation_id": "691",
+    "role": "probe_intent",
+    "true_flow": "troubleshoot_site",
+    "true_subflow": "slow_speed",
+    "opening": "HI THE WEBSITE IS RUNNING REALLY SLOW",
+    "conversation_date": "2026-09-14"
+  }
+]
