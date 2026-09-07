@@ -89,6 +89,11 @@ def test_ds_discovery_is_invoked_from_the_real_agent_path(bertopic_runtime, stub
     monkeypatch.setattr("playbook.graph.discover_intent_topics", spy_intent)
     monkeypatch.setattr("playbook.graph.discover_subflow_topics", spy_subflow)
 
+    from playbook import runtime as rt
+
+    # Seed-window chats classify under centroids. Discovery wiring is checked
+    # on the leftover path the stub clusterer already understands.
+    rt.seed_examples = []
     _invoke_demo_week()
 
     assert intent_calls, "discover_intent_topics was not called from invoke_week"
@@ -96,6 +101,9 @@ def test_ds_discovery_is_invoked_from_the_real_agent_path(bertopic_runtime, stub
 
 
 def test_discovery_outputs_enter_stable_typed_graph_state(bertopic_runtime, stub_topic_fit):
+    from playbook import runtime as rt
+
+    rt.seed_examples = []
     result = _invoke_demo_week()
 
     assert result["current_stage"] == "summarize"
@@ -128,6 +136,9 @@ def test_canonical_agent_kb_retriever_is_used(bertopic_runtime, stub_topic_fit, 
 
     monkeypatch.setattr("playbook.graph.retrieve_guidance", spy_retrieve)
 
+    from playbook import runtime as rt
+
+    rt.seed_examples = []
     result = _invoke_demo_week()
 
     assert retrieve_calls, "retrieve_guidance was not used on the agent path"

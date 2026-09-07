@@ -874,6 +874,11 @@ def intent_discovery_summarize(state: MetaAgentState) -> dict[str, Any]:
         "outlier_count": sum(1 for p in rows if p["proposal_type"] == "outlier"),
         "approved_count": sum(1 for p in rows if p["review_decision"] == "accept"),
         "rejected_count": sum(1 for p in rows if p["review_decision"] == "decline"),
+        "inserted": [
+            p["candidate"]
+            for p in rows
+            if p["review_decision"] == "accept" and p.get("candidate")
+        ],
         "changes": proposal_changes(rows),
     }
     merged = dict(state.get("discovery_summary") or {})
@@ -1078,6 +1083,11 @@ def subflow_discovery_summarize(state: MetaAgentState) -> dict[str, Any]:
         "emerging_count": sum(1 for p in rows if p["proposal_type"] == "emerging"),
         "approved_count": sum(1 for p in rows if p["review_decision"] == "accept"),
         "rejected_count": sum(1 for p in rows if p["review_decision"] == "decline"),
+        "inserted": [
+            {"id": p["candidate"], "parent": p["parent_intent"]}
+            for p in rows
+            if p["review_decision"] == "accept" and p.get("candidate")
+        ],
         "changes": proposal_changes(rows),
     }
     merged = dict(state.get("discovery_summary") or {})

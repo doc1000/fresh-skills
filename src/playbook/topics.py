@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Sequence
 from functools import lru_cache
+from threading import Event, Lock, Thread
 from typing import Any, Literal
 
 import numpy as np
@@ -210,6 +211,130 @@ def _stop_words(config: BertopicConfig) -> list[str]:
     return list(frozenset(ENGLISH_STOP_WORDS).union(config.extra_stopwords))
 
 
+_WARM_LOCK = Lock()
+_WARM_DONE = Event()
+_WARM_THREAD: Thread | None = None
+_WARM_ERROR: BaseException | None = None
+_BERTopic: Any = None
+
+# Dummy fit sized like MiniLM so Numba compiles the cosine path discover uses.
+_WARMUP_DIM = 384
+_WARMUP_N = 24
+
+
+def make_umap(n: int, config: BertopicConfig) -> Any:
+    """Unfitted UMAP. n-dependent knobs; do not reuse a fitted instance."""
+    from umap import UMAP
+
+    return UMAP(
+        n_neighbors=max(2, min(config.n_neighbors, n - 2)),
+        n_components=min(config.n_components, max(2, n - 2)),
+        min_dist=config.min_dist,
+        metric=config.umap_metric,
+        random_state=config.seed,
+    )
+
+
+def make_hdbscan(n: int, config: BertopicConfig) -> Any:
+    """Unfitted HDBSCAN. Fresh instance per leftover pile."""
+    from hdbscan import HDBSCAN
+
+    return HDBSCAN(
+        min_cluster_size=min(config.min_cluster_size, max(2, n)),
+        min_samples=config.min_samples,
+        metric=config.hdbscan_metric,
+        cluster_selection_method=config.cluster_selection_method,
+        prediction_data=True,
+    )
+
+
+def make_vectorizer(config: BertopicConfig) -> Any:
+    from sklearn.feature_extraction.text import CountVectorizer
+
+    return CountVectorizer(
+        stop_words=_stop_words(config),
+        ngram_range=config.ngram_range,
+        min_df=config.min_df,
+    )
+
+
+def _bertopic_class() -> Any:
+    global _BERTopic
+    if _BERTopic is None:
+        from bertopic import BERTopic
+
+        _BERTopic = BERTopic
+    return _BERTopic
+
+
+def _warmup_imports_and_jit() -> None:
+    """Import the topic stack and compile UMAP/HDBSCAN on a tiny dummy matrix."""
+    global _BERTopic
+    from bertopic import BERTopic
+    from hdbscan import HDBSCAN
+    from umap import UMAP
+
+    _BERTopic = BERTopic
+    dummy = np.random.RandomState(42).rand(_WARMUP_N, _WARMUP_DIM).astype(np.float32)
+    UMAP(
+        n_neighbors=5,
+        n_components=2,
+        min_dist=0.0,
+        metric="cosine",
+        random_state=42,
+    ).fit(dummy)
+    HDBSCAN(min_cluster_size=5, min_samples=1, metric="euclidean").fit(dummy)
+
+
+def _run_warmup() -> None:
+    global _WARM_ERROR
+    try:
+        _warmup_imports_and_jit()
+    except BaseException as exc:
+        _WARM_ERROR = exc
+    finally:
+        _WARM_DONE.set()
+
+
+def start_topic_stack_warmup(*, background: bool = True) -> None:
+    """Import BERTopic/UMAP/HDBSCAN and JIT-compile without blocking the caller.
+
+    Safe to call more than once. A dummy fit warms Numba; fitted models are discarded.
+    """
+    global _WARM_THREAD
+    if _WARM_DONE.is_set():
+        return
+    with _WARM_LOCK:
+        if _WARM_DONE.is_set():
+            return
+        if _WARM_THREAD is not None and _WARM_THREAD.is_alive():
+            return
+        if background:
+            _WARM_THREAD = Thread(target=_run_warmup, name="topic-stack-warmup", daemon=True)
+            _WARM_THREAD.start()
+            return
+        _run_warmup()
+
+
+def ensure_topic_stack_warm() -> None:
+    """Block until warmup has finished. Starts a sync warmup if none is running."""
+    if _WARM_DONE.is_set():
+        return
+    start_topic_stack_warmup(background=False)
+    thread = _WARM_THREAD
+    if thread is not None and thread.is_alive():
+        thread.join()
+
+
+def reset_topic_stack_warmup() -> None:
+    """Test helper. Does not cancel a live warmup thread."""
+    global _WARM_THREAD, _WARM_ERROR, _BERTopic
+    _WARM_DONE.clear()
+    _WARM_THREAD = None
+    _WARM_ERROR = None
+    _BERTopic = None
+
+
 def fit_topic_model(
     documents: Sequence[str],
     config: BertopicConfig | None = None,
@@ -218,36 +343,16 @@ def fit_topic_model(
     embeddings: np.ndarray | None = None,
 ) -> FittedTopics:
     """Fit BERTopic and return topic ids + descriptors only."""
-    from bertopic import BERTopic
-    from hdbscan import HDBSCAN
-    from sklearn.feature_extraction.text import CountVectorizer
-    from umap import UMAP
-
+    ensure_topic_stack_warm()
     config = config or BertopicConfig()
     docs = list(documents)
     n = len(docs)
     embedder = get_embedder(embedding_model or config.embedding_model)
-    model = BERTopic(
+    model = _bertopic_class()(
         embedding_model=embedder,
-        umap_model=UMAP(
-            n_neighbors=max(2, min(config.n_neighbors, n - 2)),
-            n_components=min(config.n_components, max(2, n - 2)),
-            min_dist=config.min_dist,
-            metric=config.umap_metric,
-            random_state=config.seed,
-        ),
-        hdbscan_model=HDBSCAN(
-            min_cluster_size=min(config.min_cluster_size, max(2, n)),
-            min_samples=config.min_samples,
-            metric=config.hdbscan_metric,
-            cluster_selection_method=config.cluster_selection_method,
-            prediction_data=True,
-        ),
-        vectorizer_model=CountVectorizer(
-            stop_words=_stop_words(config),
-            ngram_range=config.ngram_range,
-            min_df=config.min_df,
-        ),
+        umap_model=make_umap(n, config),
+        hdbscan_model=make_hdbscan(n, config),
+        vectorizer_model=make_vectorizer(config),
         calculate_probabilities=False,
         verbose=False,
     )

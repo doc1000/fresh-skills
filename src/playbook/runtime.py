@@ -28,7 +28,7 @@ from playbook.kb import DEFAULT_DATA_DIR, PlaybookKB, load_conversations, load_p
 
 from playbook.store import TaskStore
 
-from playbook.topics import BertopicConfig, FitRule, embed_texts
+from playbook.topics import BertopicConfig, FitRule, embed_texts, start_topic_stack_warmup
 
 from playbook.vectors import VectorStore, sync_playbook_vectors, sync_task_vectors
 
@@ -48,7 +48,7 @@ method: str = "bertopic"
 
 topic_config: BertopicConfig | None = None
 
-min_sim: float = 0.60
+min_sim: float = 0.70
 
 min_margin: float = 0.05
 
@@ -98,13 +98,13 @@ def configure_runtime(
 
     load_env: bool = True,
 
-    method: str = "bertopic",
+    method: str = method,
 
     topic_config: BertopicConfig | None = None,
 
-    min_sim: float = 0.60,
+    min_sim: float =min_sim,
 
-    min_margin: float = 0.05,
+    min_margin: float = min_margin,
 
     fit_rule: FitRule = "either",
 
@@ -172,7 +172,8 @@ def configure_runtime(
 
     sync_task_vectors(rt.vectors, store.get_tasks([c["convo_id"] for c in convos]), rt.embed_fn)
 
-
+    if embed_fn_override is None:
+        start_topic_stack_warmup(background=True)
 
     return playbook, store
 

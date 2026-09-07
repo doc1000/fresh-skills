@@ -24,8 +24,10 @@ from playbook.topics import (
     BertopicConfig,
     TopicDiscoveryResult,
     TopicInfo,
+    centroid_matrix,
     classify_against,
     embed_texts,
+    resolve_label,
 )
 from playbook.vectors import KB_KIND_INTENT_GUIDE, KB_KIND_SUBFLOW, kb_doc_id_subflow
 
@@ -35,9 +37,9 @@ FitRule = Literal["centroid", "guideline", "either", "both"]
 # overwrite `runtime.topic_config` before invoke.
 RUNTIME_TOPIC_CONFIG = BertopicConfig(
     min_to_cluster=5,
-    min_cluster_size=5,
+    min_cluster_size=3,
     min_samples=1,
-    min_topic_n=5,
+    min_topic_n=3,
     representative_n=3,
     n_neighbors=12,
     n_components=5,
@@ -205,6 +207,63 @@ def _guideline_embeddings(
     return label_names, fn(guide_docs)
 
 
+def _seed_label(
+    item: dict[str, Any],
+    *,
+    kind: Literal["intent", "subflow"],
+    parent_intent: str | None,
+) -> str | None:
+    scenario = item.get("scenario") or {}
+    if kind == "intent":
+        return str(scenario["flow"]) if scenario.get("flow") else None
+    if parent_intent and scenario.get("flow") != parent_intent:
+        return None
+    return str(scenario["subflow"]) if scenario.get("subflow") else None
+
+
+def _seed_embeddings(items: Sequence[dict[str, Any]]) -> np.ndarray:
+    from playbook import runtime as rt
+
+    task_ids = [str(item["convo_id"]) for item in items]
+    if rt.vectors is not None:
+        ordered, matrix = rt.vectors.task_matrix(task_ids)
+        if list(ordered) == task_ids:
+            return matrix
+    documents = [_example_document(item) for item in items]
+    fn = rt.embed_fn or embed_texts
+    return fn(documents)
+
+
+def _centroid_prototypes(
+    seed_examples: Sequence[dict[str, Any]],
+    names: Sequence[str],
+    *,
+    kind: Literal["intent", "subflow"],
+    parent_intent: str | None,
+) -> np.ndarray | None:
+    labeled: list[dict[str, Any]] = []
+    labels: list[str] = []
+    wanted = set(names)
+    for item in seed_examples:
+        label = _seed_label(item, kind=kind, parent_intent=parent_intent)
+        if label in wanted:
+            labeled.append(item)
+            labels.append(label)
+    if not labeled or any(name not in labels for name in names):
+        return None
+    return centroid_matrix(_seed_embeddings(labeled), labels, names)
+
+
+def _winning_confidence(centroid, guideline, label: str | None) -> float:
+    if label is None:
+        return 0.0
+    if centroid.fits and guideline.fits:
+        return round(float(centroid.sim if centroid.sim >= guideline.sim else guideline.sim), 3)
+    if centroid.fits:
+        return round(float(centroid.sim), 3)
+    return round(float(guideline.sim), 3)
+
+
 def _prototype_rows(
     conversations: Sequence[ConversationRecord],
     playbook: PlaybookKB,
@@ -217,7 +276,6 @@ def _prototype_rows(
     min_margin: float,
     fit_rule: FitRule,
 ) -> list[dict[str, Any]]:
-    del seed_examples, fit_rule  # guideline-only cosine; centroids removed
     records = list(conversations)
     if not records or not names:
         return []
@@ -232,19 +290,56 @@ def _prototype_rows(
         min_sim=min_sim,
         min_margin=min_margin,
     )
+    centroids = _centroid_prototypes(
+        seed_examples, names, kind=kind, parent_intent=parent_intent
+    )
+    if centroids is None:
+        centroid_matches = [None] * len(records)
+    else:
+        centroid_matches = classify_against(
+            embeddings,
+            centroids,
+            names,
+            min_sim=min_sim,
+            min_margin=min_margin,
+        )
 
     rows: list[dict[str, Any]] = []
     for index, record in enumerate(records):
         guideline = guideline_matches[index]
-        label = guideline.pred if guideline.fits else None
+        centroid = centroid_matches[index]
+        if centroid is None:
+            label = guideline.pred if guideline.fits and fit_rule in {"guideline", "either"} else None
+            rows.append(
+                {
+                    "conversation_id": record.conversation_id,
+                    "assigned": bool(label),
+                    "label": label,
+                    "confidence": round(float(guideline.sim), 3) if label else 0.0,
+                    "centroid_pred": "",
+                    "centroid_sim": 0.0,
+                    "guideline_pred": guideline.pred,
+                    "guideline_sim": round(float(guideline.sim), 3),
+                }
+            )
+            continue
+        label = resolve_label(
+            centroid.fits,
+            centroid.pred,
+            centroid.sim,
+            guideline.fits,
+            guideline.pred,
+            guideline.sim,
+            fit_rule,
+        )
         rows.append(
             {
                 "conversation_id": record.conversation_id,
-                "assigned": bool(guideline.fits and label),
+                "assigned": bool(label),
                 "label": label,
-                "confidence": round(float(guideline.sim), 3) if guideline.fits else 0.0,
-                "centroid_pred": "",
-                "centroid_sim": 0.0,
+                "confidence": _winning_confidence(centroid, guideline, label),
+                "centroid_pred": centroid.pred,
+                "centroid_sim": round(float(centroid.sim), 3),
                 "guideline_pred": guideline.pred,
                 "guideline_sim": round(float(guideline.sim), 3),
             }

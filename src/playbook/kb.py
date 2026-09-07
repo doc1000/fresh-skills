@@ -192,9 +192,9 @@ def kb_catalog(playbook: PlaybookKB | None = None, *, include_guidance: bool = F
             row: dict[str, Any] = {
                 "id": subflow_id,
                 "title": kb.subflow_title(subflow_id),
-                "has_pathway": kb.has_pathway(intent_id, subflow_id),
             }
             if include_guidance:
+                row["has_pathway"] = kb.has_pathway(intent_id, subflow_id)
                 row["guidance"] = kb.guideline_subflow_text(intent_id, subflow_id)
                 row["actions"] = list(kb.kb.get(subflow_id) or [])
             subflows.append(row)

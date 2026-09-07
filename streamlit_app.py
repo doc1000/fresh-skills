@@ -39,13 +39,13 @@ sub-intentions (subflow). I can:
 Pass a date range, or I will look for unclassified tasks.
 
 ### current seeded data
-seed: ~Aug 25–Sep 8
+seed: ~Aug 25–Sep 8, 2026
 
-noise: Sep 9–10
+noise: Sep 9–10, 2026
 
-status_payment_method: Sep 10–12
+status_payment_method: Sep 10–12, 2026
 
-slow_speed: Sep 12–14
+slow_speed: Sep 12–14, 2026
 """
 
 RESET_WARNING = """
@@ -238,6 +238,31 @@ def chunk_text(chunk) -> str:
     return "".join(parts)
 
 
+def task_window(store) -> tuple[str, str, int]:
+    row = store.fetchall(
+        "SELECT min(conversation_date) AS lo, max(conversation_date) AS hi,"
+        " count(*) AS n FROM tasks"
+    )[0]
+    return row["lo"] or "", row["hi"] or "", row["n"]
+
+
+def session_context(lo: str, hi: str, n: int) -> str:
+    """Prefix for a thread's first message.
+
+    Without it the model has to guess a year for a bare "Aug 25", and the
+    seeded data sits in a year it will not guess.
+    """
+    return (
+        f"[session context] The task store holds {n} customer-support tasks "
+        f"dated {lo} through {hi}. Resolve any partial or relative date the "
+        "user gives inside that window. Do not assume a different year."
+    )
+
+
+def thread_is_new(agent, config) -> bool:
+    return not (agent.get_state(config).values or {}).get("messages")
+
+
 def final_answer(agent, config) -> str:
     """The checkpointer's last assistant message, which is the turn's answer.
 
@@ -272,7 +297,7 @@ def tool_lines(payload: dict) -> list[str]:
     return lines
 
 
-def stream_turn(agent, prompt: str, thread_id: str, record: dict) -> None:
+def stream_turn(agent, prompt: str, thread_id: str, record: dict, context: str = "") -> None:
     """Stream one turn into `record`, which is already in the transcript.
 
     Mutating in place means a Stop keeps whatever arrived before the interrupt.
@@ -280,7 +305,9 @@ def stream_turn(agent, prompt: str, thread_id: str, record: dict) -> None:
     from langchain_core.messages import AIMessage
 
     config = {"configurable": {"thread_id": thread_id}}
-    payload = {"messages": [{"role": "user", "content": prompt}]}
+    # The context rides on the first message only; after that it is in history.
+    sent = f"{context}\n\n{prompt}" if context and thread_is_new(agent, config) else prompt
+    payload = {"messages": [{"role": "user", "content": sent}]}
 
     status = st.status("Working…", expanded=True)
     body = st.empty()
@@ -347,6 +374,8 @@ except Exception as exc:  # surfaced instead of a stack trace in the console
     st.error(f"Startup failed: {exc}")
     st.stop()
 
+task_lo, task_hi, n_tasks = task_window(store)
+
 with st.sidebar:
     st.markdown("**Runtime**")
     st.caption(f"model `{DEFAULT_MODEL}`")
@@ -358,7 +387,7 @@ with st.sidebar:
         f"kb version `{playbook.version}` · intents `{len(playbook.intent_ids())}`"
         f" · subflows `{subflows}`"
     )
-    st.caption(f"tasks loaded `{len(store.fetchall('SELECT task_id FROM tasks'))}`")
+    st.caption(f"tasks loaded `{n_tasks}` · `{task_lo}` → `{task_hi}`")
     st.caption(f"thread `{st.session_state.thread_id}` · gen `{generation}`")
 
 for message in st.session_state.messages:
@@ -381,7 +410,13 @@ if prompt:
     st.session_state.messages.append(record)
     with st.chat_message("assistant"):
         try:
-            stream_turn(agent, prompt, st.session_state.thread_id, record)
+            stream_turn(
+                agent,
+                prompt,
+                st.session_state.thread_id,
+                record,
+                context=session_context(task_lo, task_hi, n_tasks),
+            )
         except Exception as exc:
             if is_streamlit_control_flow(exc):
                 record["content"] = (record["content"] + "\n\n_Stopped._").lstrip()

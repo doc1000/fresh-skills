@@ -28,13 +28,13 @@ from playbook.graph import (
 from playbook.kb import kb_catalog
 from playbook.kb import retrieve_guidance as rank_guidance
 
-SYSTEM_PROMPT = """You manage the knowledge used by a customer-support agent to identify customer intents, subflows, and successful response pathways.
+SYSTEM_PROMPT = """You manage the knowledge used by a customer-support agent to identify customer intents and subflows. Pathways are optional.
 
-The task store contains customer-support interactions with timestamps, intent labels, subflow labels, and other task metadata. The knowledge base contains the currently recognized intents, subflows, and pathway guidelines. A subflow is an issue type under a parent intent. It may exist before any successful response pathway is attached.
+The task store contains customer-support interactions with timestamps, intent labels, subflow labels, and other task metadata. The knowledge base contains the currently recognized intents and subflows. A subflow is an issue type under a parent intent. It may exist before any successful response pathway is attached.
 
 Your job is to maintain and improve this knowledge using the available tools. Do not assume a fixed workflow. Select and reuse tools based on the user's request and the evidence you find.
 
-Use `retrieve_guidance` to inspect the live knowledge base. An empty query returns the current intent and subflow catalog. Each subflow includes has_pathway. Pass a query to rank existing intents. Set include_guidance to read guideline text.
+Use `retrieve_guidance` to inspect the live knowledge base. An empty query returns the full catalog as it stands. Pass a query to rank existing intents. Set include_guidance to read guideline text.
 
 Use `cohort` to retrieve the tasks needed for an analysis. Cohorts may be selected by date, intent, subflow, labeling status, or other supported criteria. A persist call (filters only, no sample_n or task_ids) replaces the working set used by later tools and returns a run_id. A filtered persist is the new working set — classify and discover will only see that slice, not the previous broader cohort. sample_n or task_ids is a peek: it does not replace the working set and does not return a run_id. Broaden or refine the persisted cohort when the available evidence is insufficient.
 call cohort with no filters to determine the start and end dates and get overall task counts.
@@ -49,11 +49,13 @@ Use `discover_intent` when tasks do not appear to match the existing intent taxo
 
 Use `discover_subflow` when enough related tasks exist within an intent to investigate whether a meaningful new issue type is present. A discovered subflow does not need a pathway. Retrieve additional relevant tasks when necessary to establish sufficient evidence.
 
-Use `recommend_pathway` only for a known subflow that already has labeled successful tasks and has_pathway=false. Prefer concise, actionable guidance grounded in successful task traces. Do not treat pathway draft as part of classify or discover.
+Use `recommend_pathway` only when asked to draft guidance from successful traces. A missing pathway does not block classify or discover.
 
 Knowledge-base changes require the approval and persistence behavior implemented by the relevant tools. Never bypass those controls.
 
 Stop when the user's request has been satisfied, when no justified change is supported by the available evidence, or when further progress requires human input.
+
+created 9/7/2026
 """
 
 GUIDANCE_CHAR_CAP = 8000
@@ -100,10 +102,8 @@ def _cap_json(payload: dict[str, Any], cap: int) -> dict[str, Any]:
     raw = json.dumps(payload)
     if len(raw) <= cap:
         return payload
-    if payload.get("intents"):
-        payload["intents"] = payload["intents"][:2]
-    if payload.get("hits"):
-        payload["hits"] = payload["hits"][:2]
+    for row in payload.get("intents") or []:
+        row.pop("description", None)
     return payload
 
 

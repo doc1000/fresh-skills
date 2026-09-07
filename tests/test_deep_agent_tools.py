@@ -108,7 +108,9 @@ def test_recommend_then_persist_recc(runtime, stub_topic_fit):
     classify_subflow.invoke({})
     discovered = discover_intent.invoke({})
     discover_subflow.invoke({})
-    intent_changes = discovered["discovery_summary"]["intents"]["changes"]
+    intent_summary = discovered["discovery_summary"]["intents"]
+    assert isinstance(intent_summary["inserted"], list)
+    intent_changes = intent_summary["changes"]
     assert intent_changes
     row = intent_changes[0]
     assert "examples" in row
@@ -165,7 +167,7 @@ def test_retrieve_guidance_tool_catalog_and_query(runtime):
     assert catalog["intents"]
     assert "id" in catalog["intents"][0]
     assert "subflows" in catalog["intents"][0]
-    assert "has_pathway" in catalog["intents"][0]["subflows"][0]
+    assert "has_pathway" not in catalog["intents"][0]["subflows"][0]
     assert "guidance" not in catalog["intents"][0]
 
     with_guide = retrieve_guidance.invoke(
@@ -266,8 +268,10 @@ def test_cohort_filter_persist_and_richer_summaries(runtime, stub_topic_fit):
     )
 
     discovered = discover_intent.invoke({})
-    changes = discovered["discovery_summary"]["intents"]["changes"]
-    assert "changes" in discovered["discovery_summary"]["intents"]
+    intent_summary = discovered["discovery_summary"]["intents"]
+    assert isinstance(intent_summary["inserted"], list)
+    changes = intent_summary["changes"]
+    assert "changes" in intent_summary
     if changes:
         row = changes[0]
         assert "examples" in row
@@ -293,8 +297,11 @@ def test_empty_path_subflow_is_classifiable(runtime, stub_topic_fit):
         for intent in catalog["intents"]
         for row in intent["subflows"]
     }
-    assert by_id["account_locked"]["has_pathway"] is False
-    assert by_id["recover_username"]["has_pathway"] is True
+    assert "account_locked" in by_id
+    assert "recover_username" in by_id
+    assert "has_pathway" not in by_id["account_locked"]
+    assert not rt.playbook.has_pathway("account_access", "account_locked")
+    assert rt.playbook.has_pathway("account_access", "recover_username")
 
     cohort.invoke(
         {
@@ -327,6 +334,7 @@ def test_discover_subflow_persists_emerging_without_pathway(runtime, stub_topic_
     classify_subflow.invoke({})
     discovered = discover_subflow.invoke({})
     summary = discovered["discovery_summary"]["subflows"]
+    assert isinstance(summary["inserted"], list)
     assert summary["candidate_count"] >= 0
     if summary["changes"]:
         row = summary["changes"][0]
@@ -345,3 +353,4 @@ def test_discover_subflow_persists_emerging_without_pathway(runtime, stub_topic_
         parent = accepted[0]["parent_intent"]
         assert candidate in rt.playbook.subflows_for(parent)
         assert not rt.playbook.has_pathway(parent, candidate)
+        assert {"id": candidate, "parent": parent} in summary["inserted"]
