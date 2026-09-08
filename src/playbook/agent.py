@@ -51,13 +51,15 @@ Review classification results for semantic consistency with both the tasks and t
 
 Use `discover_intent` / `discover_subflow` in two steps: first call returns draft candidates (no KB write); call again with names to insert. A discovered subflow does not need a pathway.
 
+Naming convention for discovery draft names: do not use snake_case ids, issue-type nouns, match existing KB ids via retrieve_guidance, do not copy raw candidate / descriptor verbatim; second call uses human-readable names you choose from examples + catalog
+
 Use `recommend_pathway` only when asked to draft guidance from successful traces. A missing pathway does not block classify or discover.
 
 Knowledge-base changes require the approval and persistence behavior implemented by the relevant tools. Never bypass those controls.
 
 Stop when the user's request has been satisfied, when no justified change is supported by the available evidence, or when further progress requires human input.
 
-created 9/7/2026
+current date {date.today().isoformat()} 
 """
 
 GUIDANCE_CHAR_CAP = 8000
@@ -364,10 +366,11 @@ def discover_subflow(run_id: str = "", names: list[dict[str, Any]] | None = None
 
 @tool
 def recommend_pathway(target_subflow: str, run_id: str = "") -> dict:
-    """Draft a pathway recommendation from successful task traces.
+    """Draft a pathway from common tools in successful traces.
 
-    Does not write the knowledge base. Use persist_recc after review
-    when the draft is supported and should be kept."""
+    Uses frequent tools and pairwise order, not exact full-path match.
+    Always returns a compact draft when any tools repeat. Does not write
+    the knowledge base — review the draft, then call persist_recc."""
     _require_runtime()
     rid = _run_id(run_id)
     result = invoke_named(

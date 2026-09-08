@@ -10,7 +10,7 @@ from typing import Annotated, Any, TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from playbook import runtime
-from playbook.actions import discover_action_paths
+from playbook.actions import discover_action_paths, discover_common_workflow
 from playbook.adapters import (
     RUNTIME_TOPIC_CONFIG,
     action_paths_to_state,
@@ -26,8 +26,6 @@ from playbook.scoring import (
     INTENT_THRESHOLD,
     LOW_INTENT_BAND,
     LOW_SUBFLOW_BAND,
-    MIN_SUCCESS_FOR_PATTERN,
-    PATTERN_SUPPORT,
     SUBFLOW_THRESHOLD,
     jaccard,
 )
@@ -1215,13 +1213,25 @@ def pathway_analyze(state: MetaAgentState) -> dict[str, Any]:
     ids = runtime.store.get_workset(state["run_id"], f"pathway:{subflow_id}")
     tasks = runtime.store.get_tasks(ids)
     successful = [t for t in tasks if t["success"]]
+    traces = [list(task.get("actions") or []) for task in successful]
+    workflow = discover_common_workflow(traces)
     path_result = discover_action_paths(tasks_to_conversations(successful))
     best = path_result.paths[0] if path_result.paths else None
+    actions = list(workflow.tools)
+    if not actions and best:
+        actions = list(best.actions)[:3]
+    if workflow.tools:
+        support = sum(workflow.tool_support[tool] for tool in workflow.tools) / len(workflow.tools)
+    elif best and path_result.n_conversations:
+        support = best.count / path_result.n_conversations
+    else:
+        support = 0.0
     payload = {
         "task_ids": ids,
         "successful": path_result.n_conversations,
-        "actions": list(best.actions) if best else [],
-        "support": (best.count / path_result.n_conversations) if best and path_result.n_conversations else 0.0,
+        "actions": actions,
+        "support": support,
+        "workflow": workflow.model_dump(),
     }
     runtime.store.set_staging(state["run_id"], f"pathway:{subflow_id}", payload)
     merged_paths = list(state.get("action_paths") or [])
@@ -1265,15 +1275,14 @@ def pathway_recommend(state: MetaAgentState) -> dict[str, Any]:
 def pathway_evaluate(state: MetaAgentState) -> dict[str, Any]:
     subflow_id = state["target_subflow"]
     payload = dict(runtime.store.get_staging(state["run_id"], f"pathway:{subflow_id}") or {})
-    ok = (
-        payload.get("successful", 0) >= MIN_SUCCESS_FOR_PATTERN
-        and payload.get("support", 0) >= PATTERN_SUPPORT
-        and bool(payload.get("actions"))
-    )
+    workflow = payload.get("workflow") or {}
+    actions = payload.get("actions") or []
     payload["evaluation"] = {
-        "supported": ok,
+        "supported": bool(actions),
         "successful": payload.get("successful"),
         "support": round(payload.get("support", 0.0), 3),
+        "mode": "common_workflow",
+        "workflow": workflow,
     }
     runtime.store.set_staging(state["run_id"], f"pathway:{subflow_id}", payload)
     return {"current_stage": "evaluate_pathway"}

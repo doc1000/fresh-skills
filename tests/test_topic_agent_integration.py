@@ -274,6 +274,7 @@ def test_no_duplicate_ds_or_agent_implementations_remain():
     assert "_run_topic_discovery" in intent_src
     assert "_run_topic_discovery" in subflow_src
     assert "discover_action_paths" in pathway_src
+    assert "discover_common_workflow" in pathway_src
     assert "cluster_conversation_ids" not in helper_src
     assert "cluster_conversation_ids" not in intent_src
     assert "cluster_conversation_ids" not in subflow_src
