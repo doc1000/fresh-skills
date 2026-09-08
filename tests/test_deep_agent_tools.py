@@ -107,9 +107,10 @@ def test_recommend_then_persist_recc(runtime, stub_topic_fit):
     classify_intent.invoke({})
     classify_subflow.invoke({})
     discovered = discover_intent.invoke({})
+    assert discovered["ok"] is True
     discover_subflow.invoke({})
     intent_summary = discovered["discovery_summary"]["intents"]
-    assert isinstance(intent_summary["inserted"], list)
+    assert intent_summary["inserted"] == []
     intent_changes = intent_summary["changes"]
     assert intent_changes
     row = intent_changes[0]
@@ -118,6 +119,12 @@ def test_recommend_then_persist_recc(runtime, stub_topic_fit):
     assert "review_note" in row
     assert "supporting_task_ids" in row
     assert len(row["supporting_task_ids"]) <= 10
+    new_intents = [c for c in intent_changes if c.get("type") == "new_intent" and c.get("proposal_id")]
+    if new_intents:
+        names = [{"proposal_id": c["proposal_id"], "name": c["candidate"]} for c in new_intents]
+        persisted = discover_intent.invoke({"names": names})
+        assert persisted["ok"] is True
+        assert persisted["discovery_summary"]["intents"]["inserted"]
 
     draft = recommend_pathway.invoke({"target_subflow": "reset_2fa"})
     assert draft["target_subflow"] == "reset_2fa"
@@ -268,8 +275,9 @@ def test_cohort_filter_persist_and_richer_summaries(runtime, stub_topic_fit):
     )
 
     discovered = discover_intent.invoke({})
+    assert discovered["ok"] is True
     intent_summary = discovered["discovery_summary"]["intents"]
-    assert isinstance(intent_summary["inserted"], list)
+    assert intent_summary["inserted"] == []
     changes = intent_summary["changes"]
     assert "changes" in intent_summary
     if changes:
@@ -279,6 +287,22 @@ def test_cohort_filter_persist_and_richer_summaries(runtime, stub_topic_fit):
         assert "review_note" in row
         assert "supporting_task_ids" in row
         assert len(row["supporting_task_ids"]) <= 10
+
+
+def test_discover_intent_persist_without_draft_returns_error(runtime):
+    from playbook import cohort, discover_intent
+
+    cohort.invoke(
+        {
+            "start_date": "2026-09-01",
+            "end_date": "2026-09-07",
+            "method": "jaccard",
+            "run_id": "no-intent-draft",
+        }
+    )
+    out = discover_intent.invoke({"names": [{"proposal_id": "prop_missing", "name": "foo"}]})
+    assert out["ok"] is False
+    assert "draft" in out["error"]
 
 
 def test_empty_path_subflow_is_classifiable(runtime, stub_topic_fit):
@@ -333,8 +357,9 @@ def test_discover_subflow_persists_emerging_without_pathway(runtime, stub_topic_
     classify_intent.invoke({})
     classify_subflow.invoke({})
     discovered = discover_subflow.invoke({})
+    assert discovered["ok"] is True
     summary = discovered["discovery_summary"]["subflows"]
-    assert isinstance(summary["inserted"], list)
+    assert summary["inserted"] == []
     assert summary["candidate_count"] >= 0
     if summary["changes"]:
         row = summary["changes"][0]
@@ -343,14 +368,20 @@ def test_discover_subflow_persists_emerging_without_pathway(runtime, stub_topic_
         assert "review_note" in row
         assert "supporting_task_ids" in row
     emerging = [
-        row
-        for row in rt.store.list_proposals("emerging-run")
-        if row["proposal_type"] == "emerging"
+        c
+        for c in summary.get("changes") or []
+        if c.get("type") == "emerging" and c.get("proposal_id")
     ]
-    accepted = [row for row in emerging if row["review_decision"] == "accept"]
-    if accepted:
-        candidate = accepted[0]["candidate"]
-        parent = accepted[0]["parent_intent"]
+    if emerging:
+        names = [
+            {"proposal_id": c["proposal_id"], "name": c.get("candidate") or "discovered_subflow"}
+            for c in emerging
+        ]
+        persisted = discover_subflow.invoke({"names": names})
+        assert persisted["ok"] is True
+        inserted = persisted["discovery_summary"]["subflows"]["inserted"]
+        assert inserted
+        parent = inserted[0]["parent"]
+        candidate = inserted[0]["id"]
         assert candidate in rt.playbook.subflows_for(parent)
         assert not rt.playbook.has_pathway(parent, candidate)
-        assert {"id": candidate, "parent": parent} in summary["inserted"]

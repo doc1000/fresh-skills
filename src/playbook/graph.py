@@ -198,11 +198,14 @@ def simulate_hitl(proposal: dict[str, Any]) -> tuple[str, str]:
     return "accept", f"Stub HITL: accept {candidate}."
 
 
-def propose_intent_label(task_ids: list[str]) -> str:
+def propose_intent_label(task_ids: list[str], descriptor: str = "") -> str:
     blob = " ".join(t["text"] for t in runtime.store.get_tasks(task_ids))
     if "package" in blob or "shipment" in blob or "delivered" in blob:
         return "shipping_issue"
-    return "new_intent"
+    source = descriptor.strip()
+    if not source:
+        source = " ".join(t["text"] for t in runtime.store.get_tasks(task_ids)[:3])
+    return _slug_label(source, "new_intent")
 
 
 def _slug_label(text: str, fallback: str) -> str:
@@ -750,8 +753,10 @@ def intent_discovery_validate(state: MetaAgentState) -> dict[str, Any]:
         task_ids = cluster["task_ids"]
         coherent = bool(cluster.get("cohesive_enough"))
         mean = mean_pairwise_jaccard(task_ids)
+        topic = cluster.get("discovered_topic") or {}
+        descriptor = topic.get("descriptor") or ""
         if coherent:
-            label = propose_intent_label(task_ids)
+            label = propose_intent_label(task_ids, descriptor)
             candidates.append(
                 {
                     "proposal_type": "new_intent",
@@ -762,6 +767,7 @@ def intent_discovery_validate(state: MetaAgentState) -> dict[str, Any]:
                         "size": len(task_ids),
                         "mean_jaccard": round(mean, 3),
                         "coherent": True,
+                        "descriptor": descriptor,
                         "source": "discover_intent_topics",
                     },
                 }
@@ -918,6 +924,33 @@ def build_intent_discovery_graph():
     graph.add_edge("persist_accepted_intents", "summarize_intent_discovery")
     graph.add_edge("summarize_intent_discovery", END)
     return graph.compile(name="discover_intents")
+
+
+def build_intent_discovery_draft_graph():
+    """Cluster and persist proposals only. KB write is a second tool call with names."""
+    graph = StateGraph(MetaAgentState)
+    add_phase_node(
+        graph, "select_unresolved_intents", intent_discovery_query, agent="intent_discovery", phase="query"
+    )
+    add_phase_node(
+        graph, "discover_intent_topics", intent_discovery_discover, agent="intent_discovery", phase="process"
+    )
+    add_phase_node(
+        graph, "validate_intent_topics", intent_discovery_validate, agent="intent_discovery", phase="process"
+    )
+    add_phase_node(
+        graph, "persist_intent_proposals", intent_discovery_persist_proposal, agent="intent_discovery", phase="persist"
+    )
+    add_phase_node(
+        graph, "summarize_intent_discovery", intent_discovery_summarize, agent="intent_discovery", phase="summarize"
+    )
+    graph.add_edge(START, "select_unresolved_intents")
+    graph.add_edge("select_unresolved_intents", "discover_intent_topics")
+    graph.add_edge("discover_intent_topics", "validate_intent_topics")
+    graph.add_edge("validate_intent_topics", "persist_intent_proposals")
+    graph.add_edge("persist_intent_proposals", "summarize_intent_discovery")
+    graph.add_edge("summarize_intent_discovery", END)
+    return graph.compile(name="discover_intents_draft")
 
 
 def subflow_discovery_query(state: MetaAgentState) -> dict[str, Any]:
@@ -1131,6 +1164,37 @@ def build_subflow_discovery_graph():
     graph.add_edge("persist_accepted_subflows", "summarize_subflow_discovery")
     graph.add_edge("summarize_subflow_discovery", END)
     return graph.compile(name="discover_subflows")
+
+
+def build_subflow_discovery_draft_graph():
+    """Cluster and persist proposals only. KB write is a second tool call with names."""
+    graph = StateGraph(MetaAgentState)
+    add_phase_node(
+        graph, "select_unresolved_subflows", subflow_discovery_query, agent="subflow_discovery", phase="query"
+    )
+    add_phase_node(
+        graph, "discover_subflow_topics", subflow_discovery_discover, agent="subflow_discovery", phase="process"
+    )
+    add_phase_node(
+        graph, "validate_subflow_topics", subflow_discovery_validate, agent="subflow_discovery", phase="process"
+    )
+    add_phase_node(
+        graph,
+        "persist_subflow_proposals",
+        subflow_discovery_persist_proposal,
+        agent="subflow_discovery",
+        phase="persist",
+    )
+    add_phase_node(
+        graph, "summarize_subflow_discovery", subflow_discovery_summarize, agent="subflow_discovery", phase="summarize"
+    )
+    graph.add_edge(START, "select_unresolved_subflows")
+    graph.add_edge("select_unresolved_subflows", "discover_subflow_topics")
+    graph.add_edge("discover_subflow_topics", "validate_subflow_topics")
+    graph.add_edge("validate_subflow_topics", "persist_subflow_proposals")
+    graph.add_edge("persist_subflow_proposals", "summarize_subflow_discovery")
+    graph.add_edge("summarize_subflow_discovery", END)
+    return graph.compile(name="discover_subflows_draft")
 
 
 def pathway_query(state: MetaAgentState) -> dict[str, Any]:

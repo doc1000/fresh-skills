@@ -1,23 +1,15 @@
-# fresh-skills (topic + agent integration worktree)
+# fresh-skills
 
-LangGraph playbook-maintenance agent with BERTopic discovery used as callable
-capabilities. Neither subsystem was redesigned.
+A LangGraph deep agent that keeps a customer-support knowledge base current. It
+classifies support tasks against the existing intent taxonomy, uses BERTopic to
+find intents and subflows the taxonomy is missing, and drafts response pathways
+from traces that succeeded.
 
-```text
-weekly batch
-     ↓
-DS discover_intent_topics / discover_subflow_topics / discover_action_paths
-     ↓
-adapters → MetaAgentState
-     ↓
-load_playbook / retrieve_guidance
-     ↓
-existing classify → discover → recommend → HITL flow
-```
+The two halves stay separate on purpose:
 
-* **Agent owns** orchestration, graph state, KB/playbook loading, RAG, tools, HITL, persistence.
-* **DS owns** intent/topic discovery, subflow discovery, and action-path discovery.
-* `src/playbook/adapters.py` is the only boundary. BERTopic objects do not enter graph state.
+* **The agent** owns orchestration, graph state, KB loading, retrieval, tools, HITL, and persistence.
+* **The topic models** own intent discovery, subflow discovery, and action-path discovery.
+* `src/playbook/adapters.py` is the only boundary between them. BERTopic objects never enter graph state.
 
 ## Setup
 
@@ -49,6 +41,12 @@ be unlinked.
 The first message of each thread carries a one-line context prefix naming the
 store's task count and date span, so a bare "Aug 25" resolves to the seeded year
 instead of the model's guess.
+
+The **New agent** popover carries a `bertopic` / `jaccard` scoring toggle,
+applied when you reset — no app restart. `jaccard` skips the BERTopic fit in
+classification and discovery, which is faster and coarser. Startup cost is the
+same either way: embeddings are synced for KB retrieval regardless, and cached
+in DuckDB after the first run. The sidebar shows the active method.
 
 **Stop** interrupts the current turn and keeps whatever streamed. **New agent**
 rebuilds the runtime from seed and discards the agent with its checkpointer,

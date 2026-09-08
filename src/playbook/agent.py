@@ -12,17 +12,21 @@ from playbook.graph import (
     SAMPLE_N_MAX,
     TASK_IDS_MAX,
     build_cohort_graph,
-    build_intent_discovery_graph,
+    build_intent_discovery_draft_graph,
     build_intent_graph,
     build_pathway_draft_graph,
-    build_subflow_discovery_graph,
+    build_subflow_discovery_draft_graph,
     build_subflow_graph,
     empty_state,
+    intent_discovery_persist_kb,
+    intent_discovery_summarize,
     invoke_named,
     pathway_persist,
     pathway_summarize,
     public_task,
     select_task_ids,
+    subflow_discovery_persist_kb,
+    subflow_discovery_summarize,
     task_card,
 )
 from playbook.kb import kb_catalog
@@ -45,9 +49,7 @@ Use `classify_subflow` when tasks have an intent but lack a subflow and there is
 
 Review classification results for semantic consistency with both the tasks and the existing knowledge base.
 
-Use `discover_intent` when tasks do not appear to match the existing intent taxonomy. Treat discovery as evidence for a possible new intent, not automatic proof that one should be created. Ensure proposed names are clear, distinct, and consistent with existing naming conventions.
-
-Use `discover_subflow` when enough related tasks exist within an intent to investigate whether a meaningful new issue type is present. A discovered subflow does not need a pathway. Retrieve additional relevant tasks when necessary to establish sufficient evidence.
+Use `discover_intent` / `discover_subflow` in two steps: first call returns draft candidates (no KB write); call again with names to insert. A discovered subflow does not need a pathway.
 
 Use `recommend_pathway` only when asked to draft guidance from successful traces. A missing pathway does not block classify or discover.
 
@@ -84,6 +86,57 @@ def _slim(result: dict[str, Any], *keys: str) -> dict[str, Any]:
         if key in result:
             out[key] = result[key]
     return out
+
+
+def _slug_discovery_name(name: str) -> str:
+    from playbook.graph import _slug_label
+
+    raw = name.strip()
+    fallback = raw.replace(" ", "_").lower()
+    return _slug_label(raw, fallback)
+
+
+def _apply_named_proposals(
+    rid: str,
+    *,
+    staging_key: str,
+    names: list[dict[str, Any]],
+    accept_types: set[str],
+) -> str | None:
+    pending_ids = set(runtime.store.get_staging(rid, staging_key) or [])
+    if not pending_ids:
+        return f"no discovery draft for run {rid}; call discover first without names"
+    by_id = {
+        str(item["proposal_id"]): str(item["name"])
+        for item in names
+        if item.get("proposal_id") and item.get("name")
+    }
+    if not by_id:
+        return "names must include proposal_id and name for each item to insert"
+    for proposal in runtime.store.list_proposals(rid):
+        pid = proposal["proposal_id"]
+        if pid not in pending_ids:
+            continue
+        if pid in by_id:
+            candidate = _slug_discovery_name(by_id[pid])
+            runtime.store.rename_proposal(pid, candidate)
+            runtime.store.decide_proposal(pid, "accept", f"Named: {candidate}")
+        elif proposal["proposal_type"] not in accept_types:
+            runtime.store.decide_proposal(pid, "decline", "Outlier — no KB change")
+    return None
+
+
+def _discovery_tool_result(result: dict[str, Any], *, ok: bool = True) -> dict[str, Any]:
+    payload = _slim(
+        result,
+        "current_stage",
+        "discovery_summary",
+        "pending_proposal_ids",
+        "approved_change_ids",
+        "kb_version",
+    )
+    payload["ok"] = ok
+    return payload
 
 
 def _cap_json(payload: dict[str, Any], cap: int) -> dict[str, Any]:
@@ -156,7 +209,7 @@ def retrieve_guidance(
 def cohort(
     start_date: str = "",
     end_date: str = "",
-    method: str = "bertopic",
+    method: str = "",
     cohort_query: dict[str, Any] | None = None,
     run_id: str = "",
     sample_n: int = 0,
@@ -168,7 +221,9 @@ def cohort(
     returns run_id. Later tools use this slice only.
 
     Peek: pass sample_n or task_ids. Does not replace the working set
-    and does not return run_id."""
+    and does not return run_id.
+
+    method: leave empty to use the configured runtime method."""
     _require_runtime()
     query = dict(cohort_query or {})
     query.setdefault("start", start_date)
@@ -251,45 +306,60 @@ def classify_subflow(run_id: str = "") -> dict:
 
 
 @tool
-def discover_intent(run_id: str = "") -> dict:
-    """Look for a possible new intent among unresolved tasks.
+def discover_intent(run_id: str = "", names: list[dict[str, Any]] | None = None) -> dict:
+    """Look for new intents among unresolved tasks.
 
-    Treat discovery as evidence for a candidate intent, not automatic
-    proof that one should be created."""
+    Without names: cluster and return draft candidates; does not write the KB.
+    With names (proposal_id + name per intent): accept those candidates and persist."""
     _require_runtime()
     rid = _run_id(run_id)
+    if names:
+        err = _apply_named_proposals(
+            rid,
+            staging_key="intent_discovery_ids",
+            names=names,
+            accept_types={"new_intent"},
+        )
+        if err:
+            return {"ok": False, "error": err, "run_id": rid}
+        state = empty_state(run_id=rid)
+        persisted = intent_discovery_persist_kb(state)
+        merged = {**state, **persisted}
+        summarized = intent_discovery_summarize(merged)
+        return _discovery_tool_result(summarized)
     result = invoke_named(
-        build_intent_discovery_graph(), empty_state(run_id=rid), agent="intent_discovery"
+        build_intent_discovery_draft_graph(), empty_state(run_id=rid), agent="intent_discovery"
     )
-    return _slim(
-        result,
-        "current_stage",
-        "discovery_summary",
-        "pending_proposal_ids",
-        "approved_change_ids",
-        "kb_version",
-    )
+    return _discovery_tool_result(result)
 
 
 @tool
-def discover_subflow(run_id: str = "") -> dict:
-    """Look for a possible new issue type among unresolved tasks in an intent.
+def discover_subflow(run_id: str = "", names: list[dict[str, Any]] | None = None) -> dict:
+    """Look for new subflows among unresolved tasks within an intent.
 
-    A new subflow can be added without a pathway. Retrieve additional
-    relevant tasks when the current evidence is thin."""
+    Without names: cluster and return draft candidates; does not write the KB.
+    With names (proposal_id + name per subflow): accept those candidates and persist.
+    A new subflow does not need a pathway."""
     _require_runtime()
     rid = _run_id(run_id)
+    if names:
+        err = _apply_named_proposals(
+            rid,
+            staging_key="subflow_discovery_ids",
+            names=names,
+            accept_types={"new_subflow", "emerging"},
+        )
+        if err:
+            return {"ok": False, "error": err, "run_id": rid}
+        state = empty_state(run_id=rid)
+        persisted = subflow_discovery_persist_kb(state)
+        merged = {**state, **persisted}
+        summarized = subflow_discovery_summarize(merged)
+        return _discovery_tool_result(summarized)
     result = invoke_named(
-        build_subflow_discovery_graph(), empty_state(run_id=rid), agent="subflow_discovery"
+        build_subflow_discovery_draft_graph(), empty_state(run_id=rid), agent="subflow_discovery"
     )
-    return _slim(
-        result,
-        "current_stage",
-        "discovery_summary",
-        "pending_proposal_ids",
-        "approved_change_ids",
-        "kb_version",
-    )
+    return _discovery_tool_result(result)
 
 
 @tool

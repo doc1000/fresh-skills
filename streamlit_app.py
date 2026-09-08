@@ -23,6 +23,9 @@ if SRC.exists() and str(SRC) not in sys.path:
 
 REPO_URL = "https://github.com/doc1000/fresh-skills"
 DEFAULT_MODEL = os.environ.get("FRESH_SKILLS_MODEL", "openai:gpt-4.1-mini")
+METHODS = ("bertopic", "jaccard")
+_env_method = os.environ.get("FRESH_SKILLS_METHOD", "")
+DEFAULT_METHOD = _env_method if _env_method in METHODS else METHODS[0]
 
 INTRO = """
 Hello. I am ready to identify customer service call intentions (intent) and
@@ -159,7 +162,7 @@ def sweep_stores(data_dir: Path, keep: Path) -> None:
 
 
 @st.cache_resource(show_spinner=False)
-def bootstrap_runtime(tasks_dir: str, kb_dir: str, generation: int):
+def bootstrap_runtime(tasks_dir: str, kb_dir: str, generation: int, method: str):
     """Load the seed playbook and rebuild the working store. Destructive.
 
     Each generation gets its own SQLite file. `TaskStore` unlinks its path on
@@ -181,6 +184,7 @@ def bootstrap_runtime(tasks_dir: str, kb_dir: str, generation: int):
         data_dir=root,
         playbook_kb=playbook_kb,
         store_path=store_path,
+        method=method,
     )
 
 
@@ -196,9 +200,9 @@ def build_agent(model_name: str, generation: int):
 
 @st.cache_resource(show_spinner=False)
 def app_state() -> dict:
-    """Process-wide counter. The runtime is a module global, so a reset in one
+    """Process-wide settings. The runtime is a module global, so a reset in one
     browser session has to move every session to the same generation."""
-    return {"generation": 0}
+    return {"generation": 0, "method": DEFAULT_METHOD}
 
 
 def new_thread() -> str:
@@ -209,7 +213,9 @@ def reset_agent() -> None:
     """Drop the agent (and with it every MemorySaver thread), then rebuild."""
     from playbook import runtime as rt
 
-    app_state()["generation"] += 1
+    state = app_state()
+    state["generation"] += 1
+    state["method"] = st.session_state.get("method_choice", DEFAULT_METHOD)
     st.session_state.thread_id = new_thread()
     st.session_state.messages = [{"role": "assistant", "content": INTRO, "tools": []}]
     build_agent.clear()
@@ -364,11 +370,11 @@ if not os.environ.get("OPENAI_API_KEY"):
     st.error("Set `OPENAI_API_KEY` in `.env` to run the agent.")
     st.stop()
 
-generation = app_state()["generation"]
+generation, method = app_state()["generation"], app_state()["method"]
 try:
     tasks_dir, kb_dir = resolve_sources()
     with st.spinner("Loading knowledge base and embeddings…"):
-        playbook, store = bootstrap_runtime(str(tasks_dir), str(kb_dir), generation)
+        playbook, store = bootstrap_runtime(str(tasks_dir), str(kb_dir), generation, method)
         agent = build_agent(DEFAULT_MODEL, generation)
 except Exception as exc:  # surfaced instead of a stack trace in the console
     st.error(f"Startup failed: {exc}")
@@ -378,7 +384,7 @@ task_lo, task_hi, n_tasks = task_window(store)
 
 with st.sidebar:
     st.markdown("**Runtime**")
-    st.caption(f"model `{DEFAULT_MODEL}`")
+    st.caption(f"model `{DEFAULT_MODEL}` · scoring `{method}`")
     st.caption(f"tasks `{show_path(tasks_dir)}`")
     if kb_dir != tasks_dir:
         st.caption(f"kb `{show_path(kb_dir)}`")
@@ -433,5 +439,14 @@ with stop:
     st.button("Stop", width="stretch", help="Interrupt the current turn")
 with reset:
     with st.popover("New agent", width="stretch"):
+        st.radio(
+            "Scoring method",
+            METHODS,
+            index=METHODS.index(method),
+            key="method_choice",
+            horizontal=True,
+            help="jaccard skips the BERTopic fit — faster, coarser.",
+        )
+        st.caption("Applied on reset.")
         st.warning(RESET_WARNING)
         st.button("Reset everything", type="primary", width="stretch", on_click=reset_agent)

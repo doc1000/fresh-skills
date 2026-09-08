@@ -338,6 +338,13 @@ class TaskStore:
         )
         self.conn.commit()
 
+    def rename_proposal(self, proposal_id: str, candidate: str) -> None:
+        self.conn.execute(
+            "UPDATE proposals SET candidate = ? WHERE proposal_id = ?",
+            (candidate, proposal_id),
+        )
+        self.conn.commit()
+
     def mark_proposal_kb_version(self, proposal_id: str, kb_version: int) -> None:
         self.conn.execute(
             "UPDATE proposals SET resulting_kb_version = ? WHERE proposal_id = ?",
