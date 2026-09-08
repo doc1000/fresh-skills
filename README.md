@@ -421,3 +421,10 @@ approved.
 * Performance evals: how well classification, discovery, and pathways compare to
   gold standards. Current evals are built around agent execution, not
   statistical performance.
+
+
+The conversations were derived from work done in the ABCD repo:
+https://github.com/asappresearch/abcd
+
+Paper citation:
+Chen et al., Action-Based Conversations Dataset: A Corpus for Building More In-Depth Task-Oriented Dialogue Systems, NAACL 2021
