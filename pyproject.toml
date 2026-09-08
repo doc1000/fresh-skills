@@ -8,14 +8,11 @@ dependencies = [
     "bertopic>=0.16",
     "deepagents>=0.7.13",
     "duckdb>=1.2",
-    "ipywidgets>=8.1.9",
     "langchain>=1.4.0",
     "langchain-core>=1.6.1",
     "langchain-openai>=1.6.0",
     "langgraph>=1.2.11",
     "langsmith>=0.11.2",
-    "matplotlib>=3.11.1",
-    "pyarrow>=17.0",
     "pydantic>=2.0",
     "python-dotenv>=1.0",
     "streamlit>=1.50",
@@ -33,16 +30,13 @@ packages = ["src/playbook"]
 
 [dependency-groups]
 dev = [
-    "ipykernel>=7.3.0",
-    "jupyterlab>=4.6.3",
-    "jupytext>=1.19.5",
-    "nbclient>=0.10",
     "pytest>=8.0",
 ]
-
-[tool.jupytext]
-formats = "ipynb,py:percent"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+addopts = "-m 'not live'"
+markers = [
+    "live: hits the real agent and the OpenAI API (deselected by default; run with -m live)",
+]

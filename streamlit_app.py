@@ -92,42 +92,27 @@ def load_env() -> None:
             os.environ[key] = str(secrets[key])
 
 
-KB_FILES = ("seed_ontology.json", "seed_kb.json", "seed_guidelines.json")
-TASK_FILES = ("incoming_conversations.json",)
+DATA_FILES = (
+    "incoming_conversations.json",
+    "seed_ontology.json",
+    "seed_kb.json",
+    "seed_guidelines.json",
+)
 
 
-def search_path() -> list[Path]:
-    """Where to look, best first: the EDA fill output, then the repo seed."""
-    from playbook.fill import EDA_DATA_DIR
+def resolve_data_dir() -> Path:
+    """The seeded tasks and KB. `FRESH_SKILLS_DATA_DIR` overrides the repo demo set."""
+    from playbook.kb import DEFAULT_DATA_DIR
 
     override = os.environ.get("FRESH_SKILLS_DATA_DIR")
-    return ([Path(override)] if override else []) + [EDA_DATA_DIR, ROOT / "scratch_data"]
-
-
-def resolve_sources() -> tuple[Path, Path]:
-    """Directories holding the tasks and the KB. They need not be the same.
-
-    `scratch_data/eda/` is the notebook fill output and wins when present. A
-    folder with tasks but no KB of its own falls back to the repo seed KB.
-    """
-    candidates = search_path()
-
-    def first_with(names: tuple[str, ...]) -> Path | None:
-        for candidate in candidates:
-            if all((candidate / name).exists() for name in names):
-                return candidate
-        return None
-
-    tasks_dir = first_with(TASK_FILES)
-    kb_dir = first_with(KB_FILES)
-    if tasks_dir is None or kb_dir is None:
-        looked = "\n".join(f"- {c}" for c in candidates)
-        missing = "tasks" if tasks_dir is None else "knowledge base"
+    candidate = Path(override) if override else DEFAULT_DATA_DIR
+    missing = [name for name in DATA_FILES if not (candidate / name).exists()]
+    if missing:
         raise FileNotFoundError(
-            f"No seeded {missing} found. Looked in:\n{looked}\n"
-            "Run the EDA fill notebook or set FRESH_SKILLS_DATA_DIR."
+            f"{candidate} is missing {', '.join(missing)}. "
+            "Point FRESH_SKILLS_DATA_DIR at a seeded folder."
         )
-    return tasks_dir, kb_dir
+    return candidate
 
 
 def show_path(path: Path) -> str:
@@ -162,7 +147,7 @@ def sweep_stores(data_dir: Path, keep: Path) -> None:
 
 
 @st.cache_resource(show_spinner=False)
-def bootstrap_runtime(tasks_dir: str, kb_dir: str, generation: int, method: str):
+def bootstrap_runtime(data_dir: str, generation: int, method: str):
     """Load the seed playbook and rebuild the working store. Destructive.
 
     Each generation gets its own SQLite file. `TaskStore` unlinks its path on
@@ -171,21 +156,12 @@ def bootstrap_runtime(tasks_dir: str, kb_dir: str, generation: int, method: str)
     worker threads, so a shared filename cannot be reclaimed on reset.
     """
     from playbook import configure_runtime
-    from playbook.kb import load_playbook
 
-    root = Path(tasks_dir)
+    root = Path(data_dir)
     store_path = root / f"app_store_{generation}.sqlite"
     release_store()
     sweep_stores(root, keep=store_path)
-    # configure_runtime reads both from data_dir; pass the KB when it lives
-    # somewhere else.
-    playbook_kb = load_playbook(Path(kb_dir)) if kb_dir != tasks_dir else None
-    return configure_runtime(
-        data_dir=root,
-        playbook_kb=playbook_kb,
-        store_path=store_path,
-        method=method,
-    )
+    return configure_runtime(data_dir=root, store_path=store_path, method=method)
 
 
 @st.cache_resource(show_spinner=False)
@@ -372,9 +348,9 @@ if not os.environ.get("OPENAI_API_KEY"):
 
 generation, method = app_state()["generation"], app_state()["method"]
 try:
-    tasks_dir, kb_dir = resolve_sources()
+    data_dir = resolve_data_dir()
     with st.spinner("Loading knowledge base and embeddings…"):
-        playbook, store = bootstrap_runtime(str(tasks_dir), str(kb_dir), generation, method)
+        playbook, store = bootstrap_runtime(str(data_dir), generation, method)
         agent = build_agent(DEFAULT_MODEL, generation)
 except Exception as exc:  # surfaced instead of a stack trace in the console
     st.error(f"Startup failed: {exc}")
@@ -385,9 +361,7 @@ task_lo, task_hi, n_tasks = task_window(store)
 with st.sidebar:
     st.markdown("**Runtime**")
     st.caption(f"model `{DEFAULT_MODEL}` · scoring `{method}`")
-    st.caption(f"tasks `{show_path(tasks_dir)}`")
-    if kb_dir != tasks_dir:
-        st.caption(f"kb `{show_path(kb_dir)}`")
+    st.caption(f"data `{show_path(data_dir)}`")
     subflows = sum(len(playbook.subflows_for(i)) for i in playbook.intent_ids())
     st.caption(
         f"kb version `{playbook.version}` · intents `{len(playbook.intent_ids())}`"

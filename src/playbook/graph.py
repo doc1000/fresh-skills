@@ -184,18 +184,6 @@ def add_phase_node(graph: StateGraph, name: str, fn, *, agent: str, phase: str) 
     graph.add_node(name, fn, metadata={"agent": agent, "phase": phase})
 
 
-def render_mermaid(compiled, *, xray: bool | int = False) -> str:
-    return compiled.get_graph(xray=xray).draw_mermaid()
-
-
-def simulate_hitl(proposal: dict[str, Any]) -> tuple[str, str]:
-    ptype = proposal.get("proposal_type")
-    if ptype == "outlier":
-        return "decline", "Stub HITL: monitor / no playbook change."
-    candidate = proposal.get("candidate") or "proposal"
-    return "accept", f"Stub HITL: accept {candidate}."
-
-
 def propose_intent_label(task_ids: list[str], descriptor: str = "") -> str:
     blob = " ".join(t["text"] for t in runtime.store.get_tasks(task_ids))
     if "package" in blob or "shipment" in blob or "delivered" in blob:
@@ -208,7 +196,10 @@ def propose_intent_label(task_ids: list[str], descriptor: str = "") -> str:
 
 def _slug_label(text: str, fallback: str) -> str:
     parts: list[str] = []
-    for raw in text.replace(",", " ").replace("-", " ").split():
+    # Underscores separate too: topic descriptors arrive comma-separated, but
+    # names the agent supplies already follow the underscore convention and
+    # would otherwise be flattened into one word.
+    for raw in text.replace(",", " ").replace("-", " ").replace("_", " ").split():
         token = "".join(ch for ch in raw.lower() if ch.isalnum())
         if len(token) > 2:
             parts.append(token)
@@ -814,16 +805,6 @@ def intent_discovery_persist_proposal(state: MetaAgentState) -> dict[str, Any]:
     return {"current_stage": "persist_intent_proposals", "pending_proposal_ids": pending_ids}
 
 
-def intent_discovery_hitl(state: MetaAgentState) -> dict[str, Any]:
-    ids = runtime.store.get_staging(state["run_id"], "intent_discovery_ids") or []
-    for proposal in runtime.store.list_proposals(state["run_id"]):
-        if proposal["proposal_id"] not in ids:
-            continue
-        decision, note = simulate_hitl(proposal)
-        runtime.store.decide_proposal(proposal["proposal_id"], decision, note)
-    return {"current_stage": "review_intent_proposals"}
-
-
 def intent_discovery_persist_kb(state: MetaAgentState) -> dict[str, Any]:
     approved = []
     ids = set(runtime.store.get_staging(state["run_id"], "intent_discovery_ids") or [])
@@ -888,40 +869,6 @@ def intent_discovery_summarize(state: MetaAgentState) -> dict[str, Any]:
     merged = dict(state.get("discovery_summary") or {})
     merged["intents"] = summary
     return {"current_stage": "summarize_intent_discovery", "discovery_summary": merged}
-
-
-def build_intent_discovery_graph():
-    graph = StateGraph(MetaAgentState)
-    add_phase_node(
-        graph, "select_unresolved_intents", intent_discovery_query, agent="intent_discovery", phase="query"
-    )
-    add_phase_node(
-        graph, "discover_intent_topics", intent_discovery_discover, agent="intent_discovery", phase="process"
-    )
-    add_phase_node(
-        graph, "validate_intent_topics", intent_discovery_validate, agent="intent_discovery", phase="process"
-    )
-    add_phase_node(
-        graph, "persist_intent_proposals", intent_discovery_persist_proposal, agent="intent_discovery", phase="persist"
-    )
-    add_phase_node(
-        graph, "review_intent_proposals", intent_discovery_hitl, agent="intent_discovery", phase="process"
-    )
-    add_phase_node(
-        graph, "persist_accepted_intents", intent_discovery_persist_kb, agent="intent_discovery", phase="persist"
-    )
-    add_phase_node(
-        graph, "summarize_intent_discovery", intent_discovery_summarize, agent="intent_discovery", phase="summarize"
-    )
-    graph.add_edge(START, "select_unresolved_intents")
-    graph.add_edge("select_unresolved_intents", "discover_intent_topics")
-    graph.add_edge("discover_intent_topics", "validate_intent_topics")
-    graph.add_edge("validate_intent_topics", "persist_intent_proposals")
-    graph.add_edge("persist_intent_proposals", "review_intent_proposals")
-    graph.add_edge("review_intent_proposals", "persist_accepted_intents")
-    graph.add_edge("persist_accepted_intents", "summarize_intent_discovery")
-    graph.add_edge("summarize_intent_discovery", END)
-    return graph.compile(name="discover_intents")
 
 
 def build_intent_discovery_draft_graph():
@@ -1039,16 +986,6 @@ def subflow_discovery_persist_proposal(state: MetaAgentState) -> dict[str, Any]:
     return {"current_stage": "persist_subflow_proposals", "pending_proposal_ids": pending_ids}
 
 
-def subflow_discovery_hitl(state: MetaAgentState) -> dict[str, Any]:
-    ids = runtime.store.get_staging(state["run_id"], "subflow_discovery_ids") or []
-    for proposal in runtime.store.list_proposals(state["run_id"]):
-        if proposal["proposal_id"] not in ids:
-            continue
-        decision, note = simulate_hitl(proposal)
-        runtime.store.decide_proposal(proposal["proposal_id"], decision, note)
-    return {"current_stage": "review_subflow_proposals"}
-
-
 def subflow_discovery_persist_kb(state: MetaAgentState) -> dict[str, Any]:
     approved = list(state.get("approved_change_ids") or [])
     ids = set(runtime.store.get_staging(state["run_id"], "subflow_discovery_ids") or [])
@@ -1124,44 +1061,6 @@ def subflow_discovery_summarize(state: MetaAgentState) -> dict[str, Any]:
     merged = dict(state.get("discovery_summary") or {})
     merged["subflows"] = summary
     return {"current_stage": "summarize_subflow_discovery", "discovery_summary": merged}
-
-
-def build_subflow_discovery_graph():
-    graph = StateGraph(MetaAgentState)
-    add_phase_node(
-        graph, "select_unresolved_subflows", subflow_discovery_query, agent="subflow_discovery", phase="query"
-    )
-    add_phase_node(
-        graph, "discover_subflow_topics", subflow_discovery_discover, agent="subflow_discovery", phase="process"
-    )
-    add_phase_node(
-        graph, "validate_subflow_topics", subflow_discovery_validate, agent="subflow_discovery", phase="process"
-    )
-    add_phase_node(
-        graph,
-        "persist_subflow_proposals",
-        subflow_discovery_persist_proposal,
-        agent="subflow_discovery",
-        phase="persist",
-    )
-    add_phase_node(
-        graph, "review_subflow_proposals", subflow_discovery_hitl, agent="subflow_discovery", phase="process"
-    )
-    add_phase_node(
-        graph, "persist_accepted_subflows", subflow_discovery_persist_kb, agent="subflow_discovery", phase="persist"
-    )
-    add_phase_node(
-        graph, "summarize_subflow_discovery", subflow_discovery_summarize, agent="subflow_discovery", phase="summarize"
-    )
-    graph.add_edge(START, "select_unresolved_subflows")
-    graph.add_edge("select_unresolved_subflows", "discover_subflow_topics")
-    graph.add_edge("discover_subflow_topics", "validate_subflow_topics")
-    graph.add_edge("validate_subflow_topics", "persist_subflow_proposals")
-    graph.add_edge("persist_subflow_proposals", "review_subflow_proposals")
-    graph.add_edge("review_subflow_proposals", "persist_accepted_subflows")
-    graph.add_edge("persist_accepted_subflows", "summarize_subflow_discovery")
-    graph.add_edge("summarize_subflow_discovery", END)
-    return graph.compile(name="discover_subflows")
 
 
 def build_subflow_discovery_draft_graph():
@@ -1364,24 +1263,6 @@ def pathway_summarize(state: MetaAgentState) -> dict[str, Any]:
     }
 
 
-def build_pathway_graph():
-    graph = StateGraph(MetaAgentState)
-    add_phase_node(graph, "select_pathway_tasks", pathway_query, agent="pathway", phase="query")
-    add_phase_node(graph, "analyze_action_paths", pathway_analyze, agent="pathway", phase="process")
-    add_phase_node(graph, "draft_pathway", pathway_recommend, agent="pathway", phase="process")
-    add_phase_node(graph, "evaluate_pathway", pathway_evaluate, agent="pathway", phase="process")
-    add_phase_node(graph, "persist_pathway", pathway_persist, agent="pathway", phase="persist")
-    add_phase_node(graph, "summarize_pathway", pathway_summarize, agent="pathway", phase="summarize")
-    graph.add_edge(START, "select_pathway_tasks")
-    graph.add_edge("select_pathway_tasks", "analyze_action_paths")
-    graph.add_edge("analyze_action_paths", "draft_pathway")
-    graph.add_edge("draft_pathway", "evaluate_pathway")
-    graph.add_edge("evaluate_pathway", "persist_pathway")
-    graph.add_edge("persist_pathway", "summarize_pathway")
-    graph.add_edge("summarize_pathway", END)
-    return graph.compile(name="recommend_pathway")
-
-
 def build_pathway_draft_graph():
     """Recommend a pathway without writing the recommendation or KB."""
     graph = StateGraph(MetaAgentState)
@@ -1401,151 +1282,3 @@ def build_pathway_draft_graph():
 
 def invoke_named(compiled, state: MetaAgentState, *, agent: str) -> MetaAgentState:
     return compiled.invoke(state, config=run_config(state, agent=agent))
-
-
-def node_establish_cohort(state: MetaAgentState) -> dict[str, Any]:
-    return invoke_named(build_cohort_graph(), state, agent="meta")
-
-
-def node_classify_intents(state: MetaAgentState) -> dict[str, Any]:
-    return invoke_named(build_intent_graph(), state, agent="intent")
-
-
-def node_classify_subflows(state: MetaAgentState) -> dict[str, Any]:
-    return invoke_named(build_subflow_graph(), state, agent="subflow")
-
-
-def node_discover_intents(state: MetaAgentState) -> dict[str, Any]:
-    return invoke_named(build_intent_discovery_graph(), state, agent="intent_discovery")
-
-
-def node_reclassify_intents(state: MetaAgentState) -> dict[str, Any]:
-    return invoke_named(build_intent_graph(), state, agent="intent")
-
-
-def node_discover_subflows(state: MetaAgentState) -> dict[str, Any]:
-    return invoke_named(build_subflow_discovery_graph(), state, agent="subflow_discovery")
-
-
-def node_reclassify_subflows(state: MetaAgentState) -> dict[str, Any]:
-    return invoke_named(build_subflow_graph(), state, agent="subflow")
-
-
-def node_recommend(state: MetaAgentState) -> dict[str, Any]:
-    out = dict(state)
-    for proposal in runtime.store.list_proposals(state["run_id"], "new_subflow"):
-        if proposal["review_decision"] != "accept":
-            continue
-        out = invoke_named(
-            build_pathway_graph(),
-            {**out, "target_subflow": proposal["candidate"]},
-            agent="pathway",
-        )
-    return {
-        "current_stage": "recommend",
-        "recommendation_summary": out.get("recommendation_summary") or {"items": [], "recommended": 0},
-        "kb_version": runtime.playbook.version,
-        "action_paths": out.get("action_paths") or [],
-    }
-
-
-def node_summarize_run(state: MetaAgentState) -> dict[str, Any]:
-    run_id = state["run_id"]
-    summary = {
-        "run_id": run_id,
-        "kb_version": runtime.playbook.version,
-        "cohort_size": len(runtime.store.cohort_ids(run_id)),
-        "intent_summary": state.get("intent_summary"),
-        "subflow_summary": state.get("subflow_summary"),
-        "discovery_summary": state.get("discovery_summary"),
-        "recommendation_summary": state.get("recommendation_summary"),
-        "intents_in_kb": runtime.playbook.intent_ids(),
-        "subflows_in_kb": runtime.playbook.ontology["intents"]["subflows"],
-        "unresolved_intents": runtime.store.unresolved_intent_ids(run_id),
-        "unresolved_subflows": runtime.store.unresolved_subflow_ids(run_id),
-    }
-    runtime.store.set_staging(run_id, "run_summary", summary)
-    return {"current_stage": "summarize", "run_id": run_id, "kb_version": runtime.playbook.version}
-
-
-def build_classify_graph(use_compiled: bool):
-    graph = StateGraph(MetaAgentState)
-    if use_compiled:
-        graph.add_node("classify_intents", build_intent_graph(), metadata={"agent": "intent", "phase": "process"})
-        graph.add_node("classify_subflows", build_subflow_graph(), metadata={"agent": "subflow", "phase": "process"})
-    else:
-        graph.add_node("classify_intents", node_classify_intents, metadata={"agent": "intent", "phase": "process"})
-        graph.add_node("classify_subflows", node_classify_subflows, metadata={"agent": "subflow", "phase": "process"})
-    graph.add_edge(START, "classify_intents")
-    graph.add_edge("classify_intents", "classify_subflows")
-    graph.add_edge("classify_subflows", END)
-    return graph.compile(name="classify")
-
-
-def build_discover_graph(use_compiled: bool):
-    graph = StateGraph(MetaAgentState)
-    if use_compiled:
-        graph.add_node(
-            "discover_intents", build_intent_discovery_graph(), metadata={"agent": "intent_discovery", "phase": "process"}
-        )
-        graph.add_node("reclassify_intents", build_intent_graph(), metadata={"agent": "intent", "phase": "process"})
-        graph.add_node(
-            "discover_subflows",
-            build_subflow_discovery_graph(),
-            metadata={"agent": "subflow_discovery", "phase": "process"},
-        )
-        graph.add_node("reclassify_subflows", build_subflow_graph(), metadata={"agent": "subflow", "phase": "process"})
-    else:
-        graph.add_node(
-            "discover_intents", node_discover_intents, metadata={"agent": "intent_discovery", "phase": "process"}
-        )
-        graph.add_node("reclassify_intents", node_reclassify_intents, metadata={"agent": "intent", "phase": "process"})
-        graph.add_node(
-            "discover_subflows", node_discover_subflows, metadata={"agent": "subflow_discovery", "phase": "process"}
-        )
-        graph.add_node("reclassify_subflows", node_reclassify_subflows, metadata={"agent": "subflow", "phase": "process"})
-    graph.add_edge(START, "discover_intents")
-    graph.add_edge("discover_intents", "reclassify_intents")
-    graph.add_edge("reclassify_intents", "discover_subflows")
-    graph.add_edge("discover_subflows", "reclassify_subflows")
-    graph.add_edge("reclassify_subflows", END)
-    return graph.compile(name="discover")
-
-
-def build_meta_graph(use_compiled: bool):
-    graph = StateGraph(MetaAgentState)
-    graph.add_node("establish_cohort", node_establish_cohort, metadata={"agent": "meta", "phase": "query"})
-    if use_compiled:
-        graph.add_node("classify", build_classify_graph(True), metadata={"agent": "meta", "phase": "process"})
-        graph.add_node("discover", build_discover_graph(True), metadata={"agent": "meta", "phase": "process"})
-    else:
-        graph.add_node("classify", build_classify_graph(False), metadata={"agent": "meta", "phase": "process"})
-        graph.add_node("discover", build_discover_graph(False), metadata={"agent": "meta", "phase": "process"})
-    graph.add_node("recommend", node_recommend, metadata={"agent": "pathway", "phase": "process"})
-    graph.add_node("summarize", node_summarize_run, metadata={"agent": "meta", "phase": "summarize"})
-    graph.add_edge(START, "establish_cohort")
-    graph.add_edge("establish_cohort", "classify")
-    graph.add_edge("classify", "discover")
-    graph.add_edge("discover", "recommend")
-    graph.add_edge("recommend", "summarize")
-    graph.add_edge("summarize", END)
-    return graph.compile(name="meta_agent")
-
-
-def build_graph(use_compiled: bool = False):
-    return build_meta_graph(use_compiled)
-
-
-def invoke_week(run_id: str, cohort_query: dict[str, Any] | None = None, *, compiled=None) -> MetaAgentState:
-    """Thin test wrapper. The public entrypoint is `build_graph(...); agent.invoke(payload)`."""
-    graph = compiled or build_graph()
-    query = dict(cohort_query or {})
-    payload = empty_state(
-        run_id=run_id,
-        start=query.get("start") or "",
-        end=query.get("end") or "",
-        method=query.get("method") or runtime.method,
-        kb_version=runtime.playbook.version if runtime.playbook is not None else 1,
-        cohort_query=query,
-    )
-    return graph.invoke(payload, config=run_config(payload, agent="meta"))

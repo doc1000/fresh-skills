@@ -12,7 +12,7 @@ import duckdb
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 
-from playbook.data import conversation_document
+from playbook.schemas import conversation_document
 from playbook.schemas import ConversationRecord, Turn
 
 if TYPE_CHECKING:

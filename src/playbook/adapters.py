@@ -16,7 +16,7 @@ from typing import Any, Literal
 import numpy as np
 
 from playbook.actions import ActionPathResult
-from playbook.data import conversation_document
+from playbook.schemas import conversation_document
 from playbook.kb import PlaybookKB
 from playbook.schemas import ConversationRecord, DiscoveredTopic, Turn
 from playbook.scoring import CLUSTER_THRESHOLD, greedy_jaccard_clusters

@@ -11,7 +11,7 @@ from langsmith import Client
 from langsmith.utils import LangSmithNotFoundError
 
 HERE = Path(__file__).resolve().parent
-ROOT = HERE.parents[1]
+ROOT = HERE.parent
 DATASET_NAME = "playbook-responsiveness"
 EXAMPLES_PATH = HERE / "responsiveness.json"
 

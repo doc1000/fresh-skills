@@ -7,7 +7,7 @@ from traces that succeeded.
 
 The two halves stay separate on purpose:
 
-* **The agent** owns orchestration, graph state, KB loading, retrieval, tools, HITL, and persistence.
+* **The agent** owns orchestration, graph state, KB loading, retrieval, tools, review gating, and persistence.
 * **The topic models** own intent discovery, subflow discovery, and action-path discovery.
 * `src/playbook/adapters.py` is the only boundary between them. BERTopic objects never enter graph state.
 
@@ -15,9 +15,18 @@ The two halves stay separate on purpose:
 
 ```text
 uv sync
+uv run streamlit run streamlit_app.py
 ```
 
-Copy `.env` if you want LangSmith traces (`LANGSMITH_API_KEY`, `LANGSMITH_PROJECT`).
+Python 3.11+. `uv.lock` is a universal lock, so the same command works on
+macOS, Linux and Windows.
+
+Copy `.env.example` to `.env` and set `OPENAI_API_KEY`. `LANGSMITH_API_KEY` and
+`LANGSMITH_PROJECT` are optional and turn on tracing.
+
+The first start downloads the `all-MiniLM-L6-v2` sentence-transformer (~90 MB)
+and embeds the 145 demo tasks. That takes a minute or two and only happens once
+— the embeddings are cached in a local DuckDB file beside the data.
 
 ## Demo app
 
@@ -25,18 +34,15 @@ Copy `.env` if you want LangSmith traces (`LANGSMITH_API_KEY`, `LANGSMITH_PROJEC
 `create_playbook_agent`, streaming tokens and tool events as they arrive.
 
 ```text
-uv sync
 uv run streamlit run streamlit_app.py
 ```
 
 Needs `OPENAI_API_KEY` in `.env`; `.env` overrides an inherited environment.
-Tasks and KB resolve separately, each from the first directory that holds them
-among `$FRESH_SKILLS_DATA_DIR`, `scratch_data/eda/` (the notebook fill output),
-and `scratch_data/` (the small repo seed) — so a fill folder with tasks but no
-KB of its own still runs. The sidebar reports what resolved. The app builds a
-disposable SQLite working store beside the tasks — one file per generation, since
-`TaskStore` opens a connection per thread and Windows will not let a live handle
-be unlinked.
+Tasks and knowledge base both load from `demo_data/`, or from
+`$FRESH_SKILLS_DATA_DIR` if that is set. The sidebar reports what resolved. The
+app builds a disposable SQLite working store beside the data — one file per
+generation, since `TaskStore` opens a connection per thread and Windows will not
+let a live handle be unlinked.
 
 The first message of each thread carries a one-line context prefix naming the
 store's task count and date span, so a bare "Aug 25" resolves to the seeded year
@@ -152,8 +158,11 @@ persistence tool for writing recommended pathways to the knowledge base.
 | `persist_recc` | commit an approved draft to the KB |
 | `retrieve_guidance` | read the live KB |
 
-There are interrupts baked into any writebacks to the knowledge base, but they
-are set to be authorized automatically for this demo.
+Knowledge-base writes are gated by a two-call protocol rather than a LangGraph
+interrupt: `discover_intent`, `discover_subflow` and `recommend_pathway` draft
+into the store, and a second call — carrying names, or `persist_recc` — is what
+commits. The agent has to come back and ask for the write, and the user sees the
+draft in between.
 
 Each turn of the main and sub-graphs is sent to LangSmith, but the main agent
 state does not see sub-agent state.
@@ -240,32 +249,34 @@ flowchart LR
 #### `discover_intent`
 
 Look for a possible new intent among unresolved tasks. Discovery is evidence for
-a candidate, not proof one should be created — so proposals are persisted, then
-reviewed, before anything is accepted.
+a candidate, not proof one should be created, so the tool takes two calls. The
+first clusters and persists proposals and writes nothing to the knowledge base:
 
 ```mermaid
 flowchart LR
     A[select_unresolved_intents] --> B[discover_intent_topics]
     B --> C[validate_intent_topics]
     C --> D[persist_intent_proposals]
-    D --> E[review_intent_proposals]
-    E --> F[persist_accepted_intents]
-    F --> G[summarize_intent_discovery]
+    D --> E[summarize_intent_discovery]
 ```
+
+The second call carries `names` — the agent's chosen ids for the proposals it
+wants kept. It runs no subgraph: the named proposals are marked accepted, the
+knowledge base is updated, and the same summary is returned. A proposal nobody
+names is never inserted, and that split is the review step.
 
 #### `discover_subflow`
 
-Look for a possible new issue type among unresolved tasks in an intent. A new
-subflow can be added without a pathway.
+Look for a possible new issue type among unresolved tasks in an intent. Same
+two-call shape as `discover_intent`. A new subflow can be added without a
+pathway.
 
 ```mermaid
 flowchart LR
     A[select_unresolved_subflows] --> B[discover_subflow_topics]
     B --> C[validate_subflow_topics]
     C --> D[persist_subflow_proposals]
-    D --> E[review_subflow_proposals]
-    E --> F[persist_accepted_subflows]
-    F --> G[summarize_subflow_discovery]
+    D --> E[summarize_subflow_discovery]
 ```
 
 #### `recommend_pathway`
@@ -294,10 +305,113 @@ after `recommend_pathway` and review. A missing draft returns an error instead
 of writing. Unsupported drafts are stored but not attached to the live knowledge
 base. No subgraph.
 
-### Future improvements
+## Repo layout
 
-* Wire in true interrupts, allowing direct editing of recommended new knowledge
-  base entries.
+```text
+streamlit_app.py     the demo front end: one threaded chat over the deep agent
+src/playbook/
+  agent.py           the eight tools and `create_playbook_agent`
+  graph.py           the compiled subgraphs each tool invokes
+  adapters.py        the only boundary between the agent and the topic models
+  topics.py          BERTopic discovery and prototype classification
+  scoring.py         jaccard fallback scoring
+  actions.py         action-path and common-workflow discovery
+  kb.py              PlaybookKB, loading and retrieval
+  store.py           SQLite working store (tasks, cohorts, proposals, drafts)
+  vectors.py         DuckDB embedding cache
+  runtime.py         the process-local playbook + store binding
+demo_data/           145 seeded tasks and the seed knowledge base
+evals/               the LangSmith dataset, its uploader and its runner
+tests/               unit tests, plus live tests behind a marker
+```
+
+## Calling the agent directly
+
+The tools are the public surface. Everything the Streamlit app does is
+available from Python:
+
+```python
+from playbook import configure_runtime, create_playbook_agent
+
+playbook, store = configure_runtime(method="jaccard")
+agent = create_playbook_agent()
+result = agent.invoke(
+    {"messages": [{"role": "user", "content": "Classify the 2026-09-01 to 2026-09-07 cohort."}]},
+    config={"configurable": {"thread_id": "demo"}},
+)
+print(result["messages"][-1].content)
+```
+
+Individual tools can be invoked without a model, which is how the tests drive
+them:
+
+```python
+from playbook import classify_intent, cohort
+
+cohort.invoke({"start_date": "2026-09-01", "end_date": "2026-09-07", "run_id": "demo"})
+classify_intent.invoke({})
+```
+
+`cohort` comes first: it fixes the working set every later tool reads.
+
+## Demo data
+
+`demo_data/` holds 145 support conversations spanning 2026-08-25 to 2026-09-14,
+derived from the [ABCD](https://github.com/asappresearch/abcd) dataset, plus the
+seed ontology, knowledge base and guidelines. Dates are synthetic and staged so
+the demo has something to find:
+
+| window | what is in it |
+| --- | --- |
+| Aug 25 – Sep 8 | seed traffic, classifiable against the seed KB |
+| Sep 9 – 10 | noise |
+| Sep 10 – 12 | `status_payment_method`, a subflow the KB does not have |
+| Sep 12 – 14 | `slow_speed`, an intent the KB does not have |
+
+The scripts that pull ABCD down and build this folder live on the development
+branch; this branch carries the built result so the demo runs from a clone.
+
+## Evals
+
+`evals/responsiveness.json` is the dataset: user requests, the tools each one
+should reach for, and the tools it must not. `evals/agent_target.py` holds the
+target and the grading, shared so the LangSmith run and the local tests cannot
+drift apart.
+
+```text
+uv run python evals/upload_dataset.py   # once, creates the LangSmith dataset
+uv run python evals/run_eval.py         # scores the agent against it
+```
+
+Three graders: every expected tool ran, no forbidden tool ran, and the dates in
+the request reached the `cohort` call. Each example runs against a fresh working
+store, so a knowledge-base write in one row cannot change the next.
+
+These evals measure agent responsiveness — did it do what was asked — not
+statistical quality of the classifications themselves.
+
+## Tests
+
+```text
+uv run pytest            # unit and integration, no network, no API key
+uv run pytest -m live    # the real agent against the real model
+```
+
+The default run stubs the embedding model and the topic fit, so it is
+deterministic and offline. `tests/test_eval_harness.py` drives the real tool
+loop with a scripted model, which covers everything about the eval path except
+the model's own choices.
+
+The live tests need `OPENAI_API_KEY`. They run the requests from
+`evals/responsiveness.json` against the 145-task store and then check the store
+itself — that classification wrote labels, that discovery persisted proposals
+without touching the KB, and that a pathway only reaches the KB after it is
+approved.
+
+## Future improvements
+
+* Wire in true LangGraph interrupts, allowing direct editing of recommended
+  knowledge base entries.
 * Pydantic shapes and validation for knowledge base entries.
 * Re-classification of task intent and subflows using the updated knowledge base.
 * Comparison of existing guidelines (workflow pathways) against new guidelines
@@ -307,36 +421,3 @@ base. No subgraph.
 * Performance evals: how well classification, discovery, and pathways compare to
   gold standards. Current evals are built around agent execution, not
   statistical performance.
-
-## Primary workflow
-
-```python
-from playbook import build_graph, configure_runtime, retrieve_guidance
-
-playbook, store = configure_runtime(method="jaccard")
-agent = build_graph()
-result = agent.invoke(
-    {
-        "run_id": "week-2026-09-01",
-        "start": "2026-09-01",
-        "end": "2026-09-07",
-        "method": "jaccard",
-        "kb_version": playbook.version,
-    }
-)
-```
-
-Canonical runtime KB is still `scratch_data/seed_*.json` via `load_playbook` /
-`retrieve_guidance`. DS `data/raw/kb.json` is not a runtime source.
-
-## Integration notebook
-
-`notebooks/integrate_topic_agent.ipynb` imports `src/playbook`, fills Agent KB
-files by hand, then calls `agent.invoke` with an explicit `start`/`end` window.
-`invoke_week` remains a thin test wrapper.
-
-## Tests
-
-```text
-uv run pytest
-```

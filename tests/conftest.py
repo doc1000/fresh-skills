@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import zlib
 from typing import Any
 
 import numpy as np
@@ -50,7 +51,10 @@ def fake_embed_texts(texts, *, embedding_model="all-MiniLM-L6-v2"):
         elif "locked" in lowered or "lockout" in lowered:
             vec[4] = 1.0
         else:
-            vec[abs(hash(lowered)) % 16] = 1.0
+            # zlib.crc32, not hash(): Python randomizes string hashing per
+            # process, which made these stub vectors — and the tests that read
+            # them — differ from run to run.
+            vec[zlib.crc32(lowered.encode("utf-8")) % 16] = 1.0
         rows.append(vec)
     return np.asarray(rows)
 
@@ -78,7 +82,7 @@ def runtime(tmp_path):
     from playbook import configure_runtime
 
     return configure_runtime(
-        data_dir=Path(__file__).resolve().parents[1] / "scratch_data" / "eda",
+        data_dir=Path(__file__).resolve().parents[1] / "demo_data",
         store_path=tmp_path / "run_store.sqlite",
         vectors_path=tmp_path / "embeddings.duckdb",
         method="jaccard",

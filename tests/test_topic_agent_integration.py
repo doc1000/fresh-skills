@@ -11,7 +11,7 @@ from playbook.schemas import ConversationRecord, DiscoveredTopic
 from playbook.topics import BertopicConfig
 
 ROOT = Path(__file__).resolve().parents[1]
-PLACEHOLDER_DATA_DIR = ROOT / "scratch_data"
+DEMO_DATA_DIR = ROOT / "demo_data"
 DEMO_TOPIC_CONFIG = BertopicConfig(
     min_to_cluster=2,
     min_cluster_size=2,
@@ -29,7 +29,7 @@ def runtime(tmp_path):
     from playbook import configure_runtime
 
     return configure_runtime(
-        data_dir=PLACEHOLDER_DATA_DIR / "eda",
+        data_dir=DEMO_DATA_DIR,
         store_path=tmp_path / "run_store.sqlite",
         vectors_path=tmp_path / "embeddings.duckdb",
         method="jaccard",
@@ -45,7 +45,7 @@ def bertopic_runtime(tmp_path):
     from playbook import configure_runtime
 
     return configure_runtime(
-        data_dir=PLACEHOLDER_DATA_DIR / "eda",
+        data_dir=DEMO_DATA_DIR,
         store_path=tmp_path / "run_store.sqlite",
         vectors_path=tmp_path / "embeddings.duckdb",
         method="bertopic",
@@ -55,18 +55,68 @@ def bertopic_runtime(tmp_path):
     )
 
 
-def _invoke_demo_week():
-    from playbook import invoke_week
+def _accept_intent_drafts(run_id: str) -> None:
+    """Accept every drafted intent, the way a named second `discover_intent` call does.
+
+    Naming is a tool-level concern, so this step goes through the tool even
+    though the surrounding steps invoke the subgraphs directly.
+    """
+    from playbook import discover_intent
     from playbook import runtime as rt
 
-    return invoke_week(
-        "week-2026-09-01",
-        {
-            "start": "2026-09-01",
-            "end": "2026-09-07",
-            "method": rt.method,
-        },
+    rt.current_run_id = run_id
+    drafts = [
+        {"proposal_id": row["proposal_id"], "name": row["candidate"]}
+        for row in rt.store.list_proposals(run_id, "new_intent")
+        if row["candidate"]
+    ]
+    if drafts:
+        discover_intent.invoke({"names": drafts, "run_id": run_id})
+
+
+def _run_demo_week(run_id: str = "week-2026-09-01", start: str = "2026-09-01", end: str = "2026-09-07"):
+    """Run the subgraphs the deep agent's tools call, keeping the full state.
+
+    The tools return slimmed summaries by design. These assertions are about the
+    typed state the subgraph nodes exchange, so the subgraphs are invoked
+    directly here — same nodes, same order a full run uses: classify against the
+    KB, discover what is left over, accept it, re-classify against the enlarged
+    KB, then do the same one level down for subflows.
+    """
+    from playbook import (
+        build_cohort_graph,
+        build_intent_discovery_draft_graph,
+        build_intent_graph,
+        build_subflow_discovery_draft_graph,
+        build_subflow_graph,
+        empty_state,
+        invoke_named,
     )
+    from playbook import runtime as rt
+
+    state = empty_state(
+        run_id=run_id,
+        start=start,
+        end=end,
+        method=rt.method,
+        kb_version=rt.playbook.version,
+    )
+
+    def step(compiled, agent):
+        nonlocal state
+        state = {**state, **invoke_named(compiled, state, agent=agent)}
+
+    step(build_cohort_graph(), "cohort")
+    step(build_intent_graph(), "intent")
+    step(build_intent_discovery_draft_graph(), "intent_discovery")
+    _accept_intent_drafts(run_id)
+    # The classifier re-queries the store after a KB mutation; the tasks that
+    # match a newly accepted intent are what subflow discovery works on.
+    state["kb_version"] = rt.playbook.version
+    step(build_intent_graph(), "intent")
+    step(build_subflow_graph(), "subflow")
+    step(build_subflow_discovery_draft_graph(), "subflow_discovery")
+    return state
 
 
 def test_ds_discovery_is_invoked_from_the_real_agent_path(bertopic_runtime, stub_topic_fit, monkeypatch):
@@ -94,19 +144,19 @@ def test_ds_discovery_is_invoked_from_the_real_agent_path(bertopic_runtime, stub
     # Seed-window chats classify under centroids. Discovery wiring is checked
     # on the leftover path the stub clusterer already understands.
     rt.seed_examples = []
-    _invoke_demo_week()
+    _run_demo_week()
 
-    assert intent_calls, "discover_intent_topics was not called from invoke_week"
-    assert subflow_calls, "discover_subflow_topics was not called from invoke_week"
+    assert intent_calls, "discover_intent_topics was not called on the tool path"
+    assert subflow_calls, "discover_subflow_topics was not called on the tool path"
 
 
 def test_discovery_outputs_enter_stable_typed_graph_state(bertopic_runtime, stub_topic_fit):
     from playbook import runtime as rt
 
     rt.seed_examples = []
-    result = _invoke_demo_week()
+    result = _run_demo_week()
 
-    assert result["current_stage"] == "summarize"
+    assert result["current_stage"] == "summarize_subflow_discovery"
     topics = result["discovered_topics"]
     subflows = result["discovered_subflows"]
     assert topics
@@ -139,7 +189,7 @@ def test_canonical_agent_kb_retriever_is_used(bertopic_runtime, stub_topic_fit, 
     from playbook import runtime as rt
 
     rt.seed_examples = []
-    result = _invoke_demo_week()
+    result = _run_demo_week()
 
     assert retrieve_calls, "retrieve_guidance was not used on the agent path"
     assert result["retrieved_guidance"]
@@ -152,50 +202,60 @@ def test_canonical_agent_kb_retriever_is_used(bertopic_runtime, stub_topic_fit, 
     assert "KB_JSON" not in graph_source
     assert "GUIDELINES_JSON" not in graph_source
     assert "data/raw/kb.json" not in kb_source
-    assert "scratch_data" in kb_source
+    assert "demo_data" in kb_source
     assert "load_playbook" in kb_source
     assert "retrieve_guidance" in kb_source
 
+def test_subgraph_nodes_keep_their_real_names():
+    """Phase nodes are named for what they do, so a LangSmith trace reads."""
+    from playbook import build_intent_graph
 
-def test_graph_still_compiles_and_renders():
-    from playbook import build_graph, build_intent_graph, render_mermaid
-
-    compiled = build_graph(False)
-    assert compiled.name == "meta_agent"
-    source = render_mermaid(build_graph(True), xray=1)
-    assert "establish_cohort" in source
-    assert "classify" in source
-    assert "discover" in source
-    assert "recommend" in source
-    intent = render_mermaid(build_intent_graph(), xray=True)
+    intent = build_intent_graph().get_graph().draw_mermaid()
     assert "select_unresolved_intents" in intent
     assert "score_intents" in intent
     assert "persist_intent_labels" in intent
     assert "summarize_intent_assignments" in intent
-    generic_nodes = [line.strip() for line in intent.splitlines() if line.strip() in {"query", "process", "persist", "summarize"}]
-    assert not generic_nodes, generic_nodes
+    generic = [
+        line.strip()
+        for line in intent.splitlines()
+        if line.strip() in {"query", "process", "persist", "summarize"}
+    ]
+    assert not generic, generic
 
-
-def test_existing_decision_and_hitl_flow_still_works(runtime, stub_topic_fit):
-    from playbook import simulate_hitl
+def test_discovery_drafts_then_persists_on_a_named_second_call(runtime, stub_topic_fit):
+    """Discovery proposes; a second call with names is what writes the KB."""
+    from playbook import cohort, discover_intent
     from playbook import runtime as rt
 
-    result = _invoke_demo_week()
-    assert result["current_stage"] == "summarize"
+    cohort.invoke(
+        {
+            "start_date": "2026-09-01",
+            "end_date": "2026-09-07",
+            "method": "jaccard",
+            "run_id": "week-2026-09-01",
+        }
+    )
+    draft = discover_intent.invoke({})
     proposals = rt.store.list_proposals("week-2026-09-01")
-    assert proposals
-    assert all(row["review_decision"] in {"accept", "decline"} for row in proposals)
-    assert any(row["candidate"] == "shipping_issue" and row["review_decision"] == "accept" for row in proposals)
-    assert any(row["proposal_type"] == "emerging" and row["review_decision"] == "accept" for row in proposals)
-    assert simulate_hitl({"proposal_type": "new_intent", "candidate": "shipping_issue"})[0] == "accept"
-    assert simulate_hitl({"proposal_type": "new_intent", "candidate": "new_intent"})[0] == "accept"
-    assert simulate_hitl({"proposal_type": "emerging", "candidate": "account_locked"})[0] == "accept"
+    assert proposals, "first call should persist proposals"
+    assert all(row["review_decision"] is None for row in proposals), "drafts are not auto-approved"
+    assert draft["discovery_summary"]["intents"]["candidate_count"] >= 1
+
+    candidates = [row for row in proposals if row["proposal_type"] == "new_intent"]
+    assert candidates
+    before = set(rt.playbook.intent_ids())
+    named = discover_intent.invoke(
+        {"names": [{"proposal_id": candidates[0]["proposal_id"], "name": "shipping_issue"}]}
+    )
+    assert named["ok"] is True
     assert "shipping_issue" in rt.playbook.intent_ids()
-    assert "recover_username" in rt.playbook.subflows_for("account_access")
-    emerging = [row for row in proposals if row["proposal_type"] == "emerging" and row["review_decision"] == "accept"]
-    assert emerging
-    assert emerging[0]["candidate"] in rt.playbook.subflows_for(emerging[0]["parent_intent"])
-    assert not rt.playbook.has_pathway(emerging[0]["parent_intent"], emerging[0]["candidate"])
+    assert set(rt.playbook.intent_ids()) - before == {"shipping_issue"}
+    accepted = [
+        row
+        for row in rt.store.list_proposals("week-2026-09-01")
+        if row["review_decision"] == "accept"
+    ]
+    assert accepted
 
 
 def test_runtime_discovery_does_not_receive_held_out_abcd_labels(bertopic_runtime, stub_topic_fit, monkeypatch):
@@ -216,7 +276,7 @@ def test_runtime_discovery_does_not_receive_held_out_abcd_labels(bertopic_runtim
     monkeypatch.setattr("playbook.graph.discover_intent_topics", capture)
     monkeypatch.setattr("playbook.graph.discover_subflow_topics", capture_subflow)
 
-    _invoke_demo_week()
+    _run_demo_week()
     assert seen
     for record in seen:
         payload = record.model_dump()
@@ -301,14 +361,13 @@ def test_task_adapter_strips_store_labels():
     assert conversations[0].actions == ["pull-up-account"]
     assert set(conversations[0].model_dump()) == {"conversation_id", "turns", "actions"}
 
-
 def test_jaccard_method_does_not_call_bertopic(tmp_path, monkeypatch):
     import conftest as test_conf
-    from playbook import configure_runtime, invoke_week
+    from playbook import classify_intent, cohort, configure_runtime, discover_intent
     from playbook.topics import TopicDiscoveryResult
 
     configure_runtime(
-        data_dir=PLACEHOLDER_DATA_DIR / "eda",
+        data_dir=DEMO_DATA_DIR,
         store_path=tmp_path / "run_store.sqlite",
         vectors_path=tmp_path / "embeddings.duckdb",
         method="jaccard",
@@ -321,52 +380,52 @@ def test_jaccard_method_does_not_call_bertopic(tmp_path, monkeypatch):
 
     monkeypatch.setattr("playbook.graph.discover_intent_topics", boom)
     monkeypatch.setattr("playbook.graph.discover_subflow_topics", boom)
-    result = invoke_week(
-        "week-jaccard",
+    cohort.invoke(
         {
-            "start": "2026-09-01",
-            "end": "2026-09-07",
+            "start_date": "2026-09-01",
+            "end_date": "2026-09-07",
             "method": "jaccard",
-        },
+            "run_id": "week-jaccard",
+        }
     )
-    assert result["current_stage"] == "summarize"
+    result = classify_intent.invoke({})
+    assert result["current_stage"] == "summarize_intent_assignments"
     assert isinstance(result["intent_summary"], dict)
     assert "classified" in result["intent_summary"]
+    discover_intent.invoke({})
     # TopicDiscoveryResult import keeps the type visible if the jaccard path returns it.
     assert TopicDiscoveryResult is not None
 
-
-def test_public_entrypoint_is_agent_invoke(runtime, stub_topic_fit):
-    from playbook import build_graph
+def test_public_entrypoint_is_the_cohort_tool(runtime, stub_topic_fit):
+    """`cohort` is the entry point: it fixes the working set every later tool reads."""
+    from playbook import cohort
     from playbook import runtime as rt
 
-    agent = build_graph()
-    payload = {
-        "run_id": "week-2026-09-01",
-        "start": "2026-09-01",
-        "end": "2026-09-07",
-        "method": "jaccard",
-        "kb_version": rt.playbook.version,
-    }
-    result = agent.invoke(payload)
-    assert result["current_stage"] == "summarize"
+    result = cohort.invoke(
+        {
+            "start_date": "2026-09-01",
+            "end_date": "2026-09-07",
+            "method": "jaccard",
+            "run_id": "week-2026-09-01",
+        }
+    )
     assert result["run_id"] == "week-2026-09-01"
     assert result["cohort_summary"]["start"] == "2026-09-01"
     assert result["cohort_summary"]["end"] == "2026-09-07"
     assert result["cohort_summary"]["n"] == len(rt.store.cohort_ids("week-2026-09-01"))
     assert result["cohort_summary"]["n"] > 0
-
+    assert rt.current_run_id == "week-2026-09-01"
 
 def test_start_end_selects_the_cohort_window(tmp_path, stub_topic_fit):
     import conftest as test_conf
-    from playbook import build_graph, configure_runtime, load_conversations
+    from playbook import cohort, configure_runtime, load_conversations
     from playbook import runtime as rt
 
-    conversations = load_conversations(PLACEHOLDER_DATA_DIR / "eda")
+    conversations = load_conversations(DEMO_DATA_DIR)
     for i, row in enumerate(conversations):
         row["conversation_date"] = "2026-08-01" if i == 0 else "2026-09-01"
     configure_runtime(
-        data_dir=PLACEHOLDER_DATA_DIR / "eda",
+        data_dir=DEMO_DATA_DIR,
         store_path=tmp_path / "run_store.sqlite",
         vectors_path=tmp_path / "embeddings.duckdb",
         method="jaccard",
@@ -375,14 +434,12 @@ def test_start_end_selects_the_cohort_window(tmp_path, stub_topic_fit):
         embed_fn_override=test_conf.fake_embed_texts,
         load_env=False,
     )
-    agent = build_graph()
-    result = agent.invoke(
+    result = cohort.invoke(
         {
-            "run_id": "window-aug",
-            "start": "2026-08-01",
-            "end": "2026-08-01",
+            "start_date": "2026-08-01",
+            "end_date": "2026-08-01",
             "method": "jaccard",
-            "kb_version": rt.playbook.version,
+            "run_id": "window-aug",
         }
     )
     assert result["cohort_summary"]["n"] == 1

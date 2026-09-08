@@ -5,20 +5,15 @@ build/
 dist/
 wheels/
 *.egg-info
-.ipynb_checkpoints/
+.pytest_cache/
 
 # Virtual environments
 .venv
 .env
 
-# Local demo stores
+# Local demo state: working stores and the embedding cache are rebuilt on start
 .streamlit/secrets.toml
-scratch_data/**/*.sqlite*
-scratch_data/**/*.duckdb
-
-
-# ABCD raw dump (regenerate with scripts/download_abcd.py)
-data/raw/*.json
-data/raw/*.gz
-data/raw/*.part
-!data/raw/.gitkeep
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.duckdb

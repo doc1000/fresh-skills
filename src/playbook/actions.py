@@ -117,8 +117,17 @@ def discover_common_workflow(
 ) -> CommonWorkflow:
     """Infer a compact common workflow from tool-call traces.
 
-    DFG-inspired heuristic: keep frequent tools, add a directed edge only when
-    pairwise precedence is decisive. Unordered pairs stay unordered.
+    DFG-inspired heuristic, tuned by two thresholds rather than by a notion of
+    statistical significance:
+
+    * `min_tool_support` (0.30) keeps a tool that appears in at least that
+      fraction of traces.
+    * `min_order_support` (0.35) adds a directed edge when that fraction of the
+      traces containing both tools saw one before the other. At 0.35 both
+      directions of an evenly split pair clear the bar, and the first in sorted
+      order wins — the pair is ordered arbitrarily but deterministically.
+
+    Raise `min_order_support` above 0.5 to keep evenly split pairs unordered.
     """
     records = [list(trace) for trace in traces]
     n_traces = len(records)

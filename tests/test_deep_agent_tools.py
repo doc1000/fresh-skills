@@ -11,7 +11,7 @@ from pathlib import Path
 
 from playbook.topics import BertopicConfig
 
-PLACEHOLDER_DATA_DIR = Path(__file__).resolve().parents[1] / "scratch_data"
+PLACEHOLDER_DATA_DIR = Path(__file__).resolve().parent / "fixtures"
 
 DEMO_TOPIC_CONFIG = BertopicConfig(
     min_to_cluster=2,

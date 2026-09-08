@@ -9,7 +9,7 @@ from typing import Any
 
 from playbook.scoring import jaccard
 
-DEFAULT_DATA_DIR = Path(__file__).resolve().parents[2] / "scratch_data" / "eda"
+DEFAULT_DATA_DIR = Path(__file__).resolve().parents[2] / "demo_data"
 
 DEFAULT_FLOW_TITLES = {"account_access": "Account Access"}
 DEFAULT_SUBFLOW_TITLES = {

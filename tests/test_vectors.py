@@ -19,7 +19,7 @@ import conftest as test_conf
 
 fake_embed_texts = test_conf.fake_embed_texts
 
-DATA_DIR = Path(__file__).resolve().parents[1] / "scratch_data" / "eda"
+DATA_DIR = Path(__file__).resolve().parents[1] / "demo_data"
 
 
 def test_vector_store_kb_query_and_task_matrix(tmp_path):

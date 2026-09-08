@@ -70,7 +70,13 @@ def test_common_workflow_clear_linear_path() -> None:
     assert by_pair[("lookup", "verify")].b_before_a == 0.0
 
 
-def test_common_workflow_skips_forced_edge_when_middle_reordered() -> None:
+def test_common_workflow_orders_an_evenly_split_middle_by_threshold() -> None:
+    """An even split clears the 0.35 default in both directions, so it is ordered.
+
+    `min_order_support` is the knob: at the default the pair gets an arbitrary
+    but deterministic direction, and raising the bar past 0.5 drops the edge.
+    The reported precedence still shows the split honestly either way.
+    """
     traces = [
         ["start", "alpha", "bravo", "end"],
         ["start", "bravo", "alpha", "end"],
@@ -82,9 +88,15 @@ def test_common_workflow_skips_forced_edge_when_middle_reordered() -> None:
     assert result.tools[0] == "start"
     assert result.tools[-1] == "end"
     edges = _edge_pairs(result)
-    assert ("alpha", "bravo") not in edges
+    assert ("alpha", "bravo") in edges
     assert ("bravo", "alpha") not in edges
     assert ("start", "end") in edges
+
+    strict = discover_common_workflow(traces, min_order_support=0.5)
+    strict_edges = _edge_pairs(strict)
+    assert ("alpha", "bravo") not in strict_edges
+    assert ("bravo", "alpha") not in strict_edges
+
     by_pair = {(row.a, row.b): row for row in result.precedence}
     middle = by_pair[("alpha", "bravo")]
     assert middle.a_before_b == 0.5
@@ -116,13 +128,23 @@ def test_common_workflow_sparse_noisy_traces_still_useful() -> None:
         ["transfer", "pull-up-account", "issue-refund"],
     ]
     result = discover_common_workflow(traces)
-    assert result.tools == ["pull-up-account", "issue-refund"]
+    # verify-identity is in 2 of 5 traces, which clears the 0.30 default.
+    assert result.tools == ["pull-up-account", "verify-identity", "issue-refund"]
+    # Raise the bar to a majority and the sparse middle step drops out.
+    strict = discover_common_workflow(traces, min_tool_support=0.5)
+    assert strict.tools == ["pull-up-account", "issue-refund"]
     assert result.tool_support["pull-up-account"] == 1.0
     assert result.tool_support["issue-refund"] == 1.0
     assert result.tool_support["note-added"] == 0.2
     assert result.tool_support["survey"] == 0.2
     assert result.tool_support["transfer"] == 0.2
-    assert _edge_pairs(result) == {("pull-up-account", "issue-refund")}
+    assert _edge_pairs(strict) == {("pull-up-account", "issue-refund")}
+    # At the default bar the retained middle step is ordered between them.
+    assert _edge_pairs(result) == {
+        ("pull-up-account", "verify-identity"),
+        ("pull-up-account", "issue-refund"),
+        ("verify-identity", "issue-refund"),
+    }
     first = discover_common_workflow(traces)
     second = discover_common_workflow(traces)
     assert first.model_dump() == second.model_dump()
