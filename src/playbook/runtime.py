@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from dotenv import load_dotenv
 
 from playbook.kb import DEFAULT_DATA_DIR, PlaybookKB, load_conversations, load_playbook
 from playbook.store import TaskStore
@@ -29,17 +30,6 @@ min_sim: float = 0.70
 min_margin: float = 0.05
 fit_rule: FitRule = "either"
 seed_examples: list[dict[str, Any]] = []
-
-
-def load_dotenv(path: Path) -> None:
-    if not path.exists():
-        return
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 
 def configure_runtime(
@@ -65,7 +55,7 @@ def configure_runtime(
 
     root = Path(data_dir) if data_dir is not None else DEFAULT_DATA_DIR
     if load_env:
-        load_dotenv(ROOT / ".env")
+        load_dotenv(ROOT / ".env", override=True)
         os.environ.setdefault("LANGSMITH_TRACING", "true")
         os.environ.setdefault("LANGSMITH_PROJECT", "fresh-skills")
     playbook = playbook_kb or load_playbook(root)

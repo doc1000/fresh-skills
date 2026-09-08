@@ -79,7 +79,6 @@ def load_env() -> None:
     from dotenv import load_dotenv
 
     # override=True: a stale OPENAI_API_KEY in the shell must not beat `.env`.
-    # `playbook.runtime.load_dotenv` uses setdefault, so it will not undo this.
     load_dotenv(ROOT / ".env", override=True)
     try:
         # Only reached when a secrets.toml exists; any failure means there is

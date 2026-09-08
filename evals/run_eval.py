@@ -77,7 +77,7 @@ def args_carried(outputs: dict, reference_outputs: dict) -> dict:
 def main() -> None:
     from dotenv import load_dotenv
 
-    load_dotenv(ROOT / ".env")
+    load_dotenv(ROOT / ".env", override=True)
     for key in ("OPENAI_API_KEY", "LANGSMITH_API_KEY"):
         if not os.environ.get(key):
             raise SystemExit(f"{key} is missing. Copy .env first.")

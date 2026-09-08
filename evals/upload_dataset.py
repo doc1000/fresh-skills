@@ -17,7 +17,7 @@ EXAMPLES_PATH = HERE / "responsiveness.json"
 
 
 def main() -> None:
-    load_dotenv(ROOT / ".env")
+    load_dotenv(ROOT / ".env", override=True)
     if not os.environ.get("LANGSMITH_API_KEY"):
         raise SystemExit("LANGSMITH_API_KEY is missing. Copy .env first.")
 
