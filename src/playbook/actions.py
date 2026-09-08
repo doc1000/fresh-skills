@@ -9,8 +9,8 @@ from pydantic import BaseModel
 
 from playbook.schemas import ConversationRecord
 
-DEFAULT_MIN_TOOL_SUPPORT = 0.50
-DEFAULT_MIN_ORDER_SUPPORT = 0.65
+DEFAULT_MIN_TOOL_SUPPORT = 0.30
+DEFAULT_MIN_ORDER_SUPPORT = 0.35
 
 
 class ActionPath(BaseModel):

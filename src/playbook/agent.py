@@ -51,7 +51,10 @@ Review classification results for semantic consistency with both the tasks and t
 
 Use `discover_intent` / `discover_subflow` in two steps: first call returns draft candidates (no KB write); call again with names to insert. A discovered subflow does not need a pathway.
 
-Naming convention for discovery draft names: do not use snake_case ids, issue-type nouns, match existing KB ids via retrieve_guidance, do not copy raw candidate / descriptor verbatim; second call uses human-readable names you choose from examples + catalog
+Naming convention for discovery draft names: 
+keep it short and descriptive, use underscores, do not use 'issue' or similar nouns,
+ match existing KB ids via retrieve_guidance, do not copy raw candidate / descriptor verbatim; second call uses human-readable names you choose from examples + catalog
+remove human names from the draft names
 
 Use `recommend_pathway` only when asked to draft guidance from successful traces. A missing pathway does not block classify or discover.
 
